@@ -25,6 +25,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <time.h>
+#include <stdlib.h>
 
 #ifdef USE_OPENCV
 using namespace caffe;  // NOLINT(build/namespaces)
@@ -234,11 +236,11 @@ DEFINE_string(mean_value, "104,117,123",
     "If specified, can be one value or can be same as image channels"
     " - would subtract from the corresponding channel). Separated by ','."
     "Either mean_file or mean_value should be provided, not both.");
-DEFINE_string(file_type, "image",
+DEFINE_string(file_type, "video",
     "The file type in the list_file. Currently support image and video.");
 DEFINE_string(out_file, "",
     "If provided, store the detection results in the out_file.");
-DEFINE_double(confidence_threshold, 0.01,
+DEFINE_double(confidence_threshold, 0.7,
     "Only store detections with score higher than the threshold.");
 
 int main(int argc, char** argv) {
@@ -309,13 +311,19 @@ int main(int argc, char** argv) {
           }
       }
   } else if (file_type == "video") {
-      cv::VideoCapture cap(file);
+      //cv::VideoCapture cap(file);
+      cv::VideoCapture cap("nvcamerasrc ! video/x-raw(memory:NVMM), width=(int)1280, height=(int)720, format=(string)I420, framerate=(fraction)5/1 ! nvvidconv flip-method=2 ! video/x-raw, format=(string)I420 ! videoconvert ! video/x-raw, format=(string)BGR ! appsink");
+
       if (!cap.isOpened()) {
           LOG(FATAL) << "Failed to open video: " << file;
       }
       cv::Mat img;
       int frame_count = 0;
+      cv::namedWindow("drone_vip", 1);
+      
+      clock_t start_time, end_time;
       while (true) {
+          start_time = clock();
           bool success = cap.read(img);
           if (!success) {
               LOG(INFO) << "Process " << frame_count << " frames from " << file;
@@ -339,9 +347,19 @@ int main(int argc, char** argv) {
                   out << static_cast<int>(d[4] * img.rows) << " ";
                   out << static_cast<int>(d[5] * img.cols) << " ";
                   out << static_cast<int>(d[6] * img.rows) << std::endl;
+                  cv::line(img, cv::Point(d[3]* img.cols,d[4] * img.rows), \
+                cv::Point(d[5]*img.cols,d[6]*img.rows), cv::Scalar(255,255,0));
               }
           }
           ++frame_count;
+
+          imshow("drone_vip", img);
+
+          if(cv::waitKey(1)==27) break;
+
+          end_time = clock();
+
+          out << "detection_delay: " << (float)(end_time - start_time) / CLOCKS_PER_SEC << std::endl; 
       }
       if (cap.isOpened()) {
           cap.release();
