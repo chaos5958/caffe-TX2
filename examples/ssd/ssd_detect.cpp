@@ -283,72 +283,73 @@ int main(int argc, char** argv) {
   std::ostream out(buf);
 
   // Process image one by one.
-  std::ifstream infile(argv[3]);
-  std::string file;
-  while (infile >> file) {
-    if (file_type == "image") {
+  // std::ifstream infile(argv[3]);
+  //while (infile >> file) {
+  std::string file = argv[3];
+
+  if (file_type == "image") {
       cv::Mat img = cv::imread(file, -1);
       CHECK(!img.empty()) << "Unable to decode image " << file;
       std::vector<vector<float> > detections = detector.Detect(img);
 
       /* Print the detection results. */
       for (int i = 0; i < detections.size(); ++i) {
-        const vector<float>& d = detections[i];
-        // Detection format: [image_id, label, score, xmin, ymin, xmax, ymax].
-        CHECK_EQ(d.size(), 7);
-        const float score = d[2];
-        if (score >= confidence_threshold) {
-          out << file << " ";
-          out << static_cast<int>(d[1]) << " ";
-          out << score << " ";
-          out << static_cast<int>(d[3] * img.cols) << " ";
-          out << static_cast<int>(d[4] * img.rows) << " ";
-          out << static_cast<int>(d[5] * img.cols) << " ";
-          out << static_cast<int>(d[6] * img.rows) << std::endl;
-        }
-      }
-    } else if (file_type == "video") {
-      cv::VideoCapture cap(file);
-      if (!cap.isOpened()) {
-        LOG(FATAL) << "Failed to open video: " << file;
-      }
-      cv::Mat img;
-      int frame_count = 0;
-      while (true) {
-        bool success = cap.read(img);
-        if (!success) {
-          LOG(INFO) << "Process " << frame_count << " frames from " << file;
-          break;
-        }
-        CHECK(!img.empty()) << "Error when read frame";
-        std::vector<vector<float> > detections = detector.Detect(img);
-
-        /* Print the detection results. */
-        for (int i = 0; i < detections.size(); ++i) {
           const vector<float>& d = detections[i];
           // Detection format: [image_id, label, score, xmin, ymin, xmax, ymax].
           CHECK_EQ(d.size(), 7);
           const float score = d[2];
           if (score >= confidence_threshold) {
-            out << file << "_";
-            out << std::setfill('0') << std::setw(6) << frame_count << " ";
-            out << static_cast<int>(d[1]) << " ";
-            out << score << " ";
-            out << static_cast<int>(d[3] * img.cols) << " ";
-            out << static_cast<int>(d[4] * img.rows) << " ";
-            out << static_cast<int>(d[5] * img.cols) << " ";
-            out << static_cast<int>(d[6] * img.rows) << std::endl;
+              out << file << " ";
+              out << static_cast<int>(d[1]) << " ";
+              out << score << " ";
+              out << static_cast<int>(d[3] * img.cols) << " ";
+              out << static_cast<int>(d[4] * img.rows) << " ";
+              out << static_cast<int>(d[5] * img.cols) << " ";
+              out << static_cast<int>(d[6] * img.rows) << std::endl;
           }
-        }
-        ++frame_count;
+      }
+  } else if (file_type == "video") {
+      cv::VideoCapture cap(file);
+      if (!cap.isOpened()) {
+          LOG(FATAL) << "Failed to open video: " << file;
+      }
+      cv::Mat img;
+      int frame_count = 0;
+      while (true) {
+          bool success = cap.read(img);
+          if (!success) {
+              LOG(INFO) << "Process " << frame_count << " frames from " << file;
+              break;
+          }
+          CHECK(!img.empty()) << "Error when read frame";
+          std::vector<vector<float> > detections = detector.Detect(img);
+
+          /* Print the detection results. */
+          for (int i = 0; i < detections.size(); ++i) {
+              const vector<float>& d = detections[i];
+              // Detection format: [image_id, label, score, xmin, ymin, xmax, ymax].
+              CHECK_EQ(d.size(), 7);
+              const float score = d[2];
+              if (score >= confidence_threshold) {
+                  out << file << "_";
+                  out << std::setfill('0') << std::setw(6) << frame_count << " ";
+                  out << static_cast<int>(d[1]) << " ";
+                  out << score << " ";
+                  out << static_cast<int>(d[3] * img.cols) << " ";
+                  out << static_cast<int>(d[4] * img.rows) << " ";
+                  out << static_cast<int>(d[5] * img.cols) << " ";
+                  out << static_cast<int>(d[6] * img.rows) << std::endl;
+              }
+          }
+          ++frame_count;
       }
       if (cap.isOpened()) {
-        cap.release();
+          cap.release();
       }
-    } else {
+  } else {
       LOG(FATAL) << "Unknown file_type: " << file_type;
-    }
   }
+
   return 0;
 }
 #else
