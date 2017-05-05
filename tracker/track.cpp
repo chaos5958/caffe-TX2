@@ -376,14 +376,18 @@ int main(int argc, char** argv) {
                 std::vector<vector<float> > detections = detector.Detect(sub_img);
 
                 int my_width, my_height;
-                int x_avg, y_avg;
+                int x_avg, y_avg, count_car = 0;
+                cv::Rect2d min_rect(0,0,1,1);
+                float min_distance = 0;
                 /* Print the detection results. */
                 for (int i = 0; i < detections.size(); ++i) {
                     const vector<float>& d = detections[i];
                     // Detection format: [image_id, label, score, xmin, ymin, xmax, ymax].
                     CHECK_EQ(d.size(), 7);
                     const float score = d[2];
+                    
                     if (score >= confidence_threshold) {
+
                         out << file << "_";
                         out << std::setfill('0') << std::setw(6) << frame_count << " ";
                         out << static_cast<int>(d[1]) << " ";
@@ -422,25 +426,51 @@ int main(int argc, char** argv) {
                             rectangle(img, cv::Point(d[3]*sub_img.cols + top_left_x, d[4]*sub_img.rows + top_left_y), 
                                     cv::Point(d[5]*sub_img.cols + top_left_x, d[6]*sub_img.rows + top_left_y),
                                     cv::Scalar(255,0,0),2,8);
+                            float cur_distance = (bbox.x + bbox.width/2 - (x_avg)) *(bbox.x + bbox.width/2 - (x_avg)) +
+                            (bbox.y + bbox.height/2 - (y_avg)) *(bbox.y + bbox.height/2 - (y_avg));
+
+                            printf("bbox.x + bbox.width/2 : %f crop (x_avg ) %d \n"
+                                , bbox.x + bbox.width/2, (x_avg ));
+
+                            if ( cur_distance < min_distance || min_distance == 0){
+                                min_distance = cur_distance;
+                                min_rect.x = d[3]*sub_img.cols + top_left_x;
+                                min_rect.y = d[4]*sub_img.rows + top_left_y;
+                                min_rect.height = my_height;
+                                min_rect.width = my_width;
+                            } 
+                            /*
                             bbox.height = my_height;
                             bbox.width = my_width;
                             bbox.x = d[3]*sub_img.cols + top_left_x;
                             bbox.y = d[4]*sub_img.rows + top_left_y;
-
-                            printf("if_height %f if_width %f if_x %f if_y %f\n",
-                                  bbox.height, bbox.width, bbox.x, bbox.y);
-                            tracker->clear();
-                            tracker = cv::Tracker::create(TRACKING_METHOD);
-                            tracker->init(img,bbox);
-
+*/
+                            printf("det_height %f det_width %f det_x %f det_y %f\n",
+                                  min_rect.height, min_rect.width, min_rect.x, min_rect.y);
+                            printf("min_distance : %f\n",min_distance);
                             detect_success = true;
+                            count_car++;
                         }
+                        printf("count_car : %d\n", count_car);
                     }
                 }
-                if(!detect_success)
+                //TODO : if minimum distance is larger than bbox, tracker use old box.
+                // do not update bbox
+                if (detect_success){
+                    bbox.height = min_rect.height;
+                    bbox.width = min_rect.width;
+                    bbox.x = min_rect.x;
+                    bbox.y = min_rect.y;
+                    tracker->clear();
+                    tracker = cv::Tracker::create(TRACKING_METHOD);
+                    tracker->init(img,bbox);
+
+                }
+                else
                 {
                     std::cout << "detection fail" << std::endl;
                 }
+                count_car = 0;
             }
             else{
                 tracker -> update(img, bbox); 

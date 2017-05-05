@@ -3,6 +3,7 @@
 #video
 
 examples/videos/20170424.mp4
+examples/videos/20170424_30fps.mp4
 
 # Compiled Object files
 *.slo
