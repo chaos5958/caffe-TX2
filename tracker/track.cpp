@@ -28,6 +28,7 @@
 #include <vector>
 #include <algorithm>
 #include <iostream>
+#include <math.h>
 
 //for tracking
 #include <opencv2/opencv.hpp>
@@ -39,7 +40,7 @@
 using namespace caffe;  // NOLINT(build/namespaces)
 
 #define TRACKING_METHOD "KCF"
-#define CROP_RATIO 2
+#define CROP_RATIO 0.5
 
 
 class Detector {
@@ -254,6 +255,19 @@ DEFINE_string(out_file, "",
 DEFINE_double(confidence_threshold, 0.4,
         "Only store detections with score higher than the threshold.");
 
+
+bool containPoint(cv::Rect2d Rect, float pointX, float pointY) 
+{
+    // Just had to change around the math
+    if (pointX < (Rect.x + Rect.width) && pointX > Rect.x &&
+           pointY < (Rect.y + Rect.height) && pointY > Rect.y)
+        return true;
+    else
+        return false;
+}
+
+
+
 int main(int argc, char** argv) {
     ::google::InitGoogleLogging(argv[0]);
     // Print output to stderr (while still logging)
@@ -338,7 +352,7 @@ int main(int argc, char** argv) {
         bool is_first_detect = true;
         bool detect_success = false;
         tracker->init(img, bbox);
-        int frame_count = 0, top_left_x = 0, top_left_y = 0;
+        int frame_count = 0, top_left_x = 0, top_left_y = 0, tmp_width = 0, tmp_height = 0;
 
         while (true) {
             success = cap.read(img);
@@ -363,9 +377,22 @@ int main(int argc, char** argv) {
                     top_left_y = std::max(static_cast<int>(bbox.y - bbox.height* CROP_RATIO), 0); 
                     top_left_y = std::min(top_left_y, img.rows);
                     
+                    tmp_width = (bbox.x - top_left_x) * 2 + bbox.width;
+                    tmp_height = (bbox.y - top_left_y) * 2 + bbox.height;
 
-                    sub_img = img(cv::Rect(top_left_x, top_left_y, (bbox.x - top_left_x) * 2 + bbox.width, (bbox.y - top_left_y) * 2 + bbox.height));  
-                    //cv::imshow("test", sub_img);
+                    if (top_left_x + tmp_width > img.cols)
+                    {
+                        tmp_width = (img.cols - top_left_x)/2;
+                    }
+
+                    if (top_left_y + tmp_height > img.rows)
+                    {
+                        tmp_height = (img.rows - top_left_y)/2;
+                    }
+                        
+                    sub_img = img(cv::Rect(top_left_x, top_left_y, tmp_width, tmp_height));  
+                    
+                    
                 }
                 else
                 {
@@ -426,8 +453,8 @@ int main(int argc, char** argv) {
                             rectangle(img, cv::Point(d[3]*sub_img.cols + top_left_x, d[4]*sub_img.rows + top_left_y), 
                                     cv::Point(d[5]*sub_img.cols + top_left_x, d[6]*sub_img.rows + top_left_y),
                                     cv::Scalar(255,0,0),2,8);
-                            float cur_distance = (bbox.x + bbox.width/2 - (x_avg)) *(bbox.x + bbox.width/2 - (x_avg)) +
-                            (bbox.y + bbox.height/2 - (y_avg)) *(bbox.y + bbox.height/2 - (y_avg));
+                            float cur_distance = sqrt((bbox.x + bbox.width/2 - (x_avg)) *(bbox.x + bbox.width/2 - (x_avg)) +
+                            (bbox.y + bbox.height/2 - (y_avg)) *(bbox.y + bbox.height/2 - (y_avg)));
 
                             printf("bbox.x + bbox.width/2 : %f crop (x_avg ) %d \n"
                                 , bbox.x + bbox.width/2, (x_avg ));
@@ -456,7 +483,12 @@ int main(int argc, char** argv) {
                 }
                 //TODO : if minimum distance is larger than bbox, tracker use old box.
                 // do not update bbox
-                if (detect_success){
+
+                //std::cout << "minx" << min_rect.x + min_rect.width/2 << "miny" << min_rect.y + min_rect.height/2 << std::endl;
+                //containPoint(bbox, min_rect.x + min_rect.width/2, min_rect.y + min_rect.height/2)
+                //if (detect_success && min_distance < std::max(bbox.width, bbox.height) * 1)
+                if(detect_success)
+                {
                     bbox.height = min_rect.height;
                     bbox.width = min_rect.width;
                     bbox.x = min_rect.x;
@@ -464,11 +496,11 @@ int main(int argc, char** argv) {
                     tracker->clear();
                     tracker = cv::Tracker::create(TRACKING_METHOD);
                     tracker->init(img,bbox);
-
-                }
+                }   
                 else
                 {
                     std::cout << "detection fail" << std::endl;
+                    std::cout << "min_distance: " << min_distance << "bbox.width: " << bbox.width << "bbox.height: " << bbox.height << std::endl;
                 }
                 count_car = 0;
             }
