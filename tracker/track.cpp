@@ -49,25 +49,48 @@
 #include <pthread.h>
 #include <semaphore.h>
 
+//for json
+#include <json/json.h>
 
 #ifdef USE_OPENCV
 using namespace caffe;  // NOLINT(build/namespaces)
+using namespace std;
 
 #define TRACKING_METHOD "KCF"
 #define CROP_RATIO 0.5
 
 //for networking
+#define BUF_SIZE 4096 
+#define LISTEN_PORT "44444"
 
-#define BUF_SIZE 128
+//for debugging
+#define NETWORK_DEBUG 0 
+
+//for developing
+#define NEW_VERSION 0
+
 //#define COMMAND_BUF_SIZE 128
 sem_t mutex;
 sem_t empty;
 sem_t full;
+pthread_cond_t track_cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t track_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+//Variables shared between threads
+bool is_detect_run = false;
+bool is_detect_thisframe = false;
+int index_obj = 0;
+int object = 0; //NOT USED YET VER.1.0
+#define CAR 0
+#define HUMAN 1
+
 
 int port_num;
 
 void error_handling(char * buf);
 void * network_handler(void * arg);
+void test_json();
+void *detection_handler(void *arg);
 
 char command_buf[BUF_SIZE];
 
@@ -315,27 +338,44 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    const string& model_file = argv[1];
-    const string& weights_file = argv[2];
+    vector<string> input_args;
+    input_args.push_back(argv[1]);
+    input_args.push_back(argv[2]);
+    input_args.push_back(argv[3]);
+
+    //Network handler thread start!
+
+    pthread_t network_thread, detection_thread;
+    pthread_create(&network_thread, NULL, network_handler, NULL);
+
+#if (NETWORK_DEBUG != 1)
+    pthread_create(&detection_thread, NULL, detection_handler, &input_args);
+#endif
+    pthread_join(network_thread, NULL);
+
+#if (NETWORK_DEBUG != 1)
+    pthread_join(detection_thread, NULL);
+#endif
+
+    return 0;
+}
+
+void *detection_handler(void *arg)
+{
+    vector<string> *input_args = (vector<string> *)arg;
+
+    const string& model_file = input_args->operator[](0);
+    const string& weights_file = input_args->operator[](1);
     const string& mean_file = FLAGS_mean_file;
     const string& mean_value = FLAGS_mean_value;
     const string& file_type = FLAGS_file_type;
     const string& out_file = FLAGS_out_file;
     const float confidence_threshold = FLAGS_confidence_threshold;
 
+    std::cout << model_file << std::endl << weights_file << std::endl;
 
-    //Network handler thread start!
-
-    pthread_t network_thread;
-    pthread_create(&network_thread, NULL, network_handler, NULL);
-    pthread_detach(network_thread);
-    
-   /* while(1)
-    {
-        sleep(1);
-    }
-    */
     // Initialize the network.
+
     Detector detector(model_file, weights_file, mean_file, mean_value);
 
     // Set the output mode.
@@ -350,13 +390,10 @@ int main(int argc, char** argv) {
     std::ostream out(buf);
 
     // Process image one by one.
-    //std::ifstream infile(argv[3]);
     std::string file;
-    //while (infile >> file) {
-
 
     if (file_type == "image") {
-        cv::Mat img = cv::imread(argv[3], -1);
+        cv::Mat img = cv::imread(input_args->operator[](2), -1);
         CHECK(!img.empty()) << "Unable to decode image " << file;
         std::vector<vector<float> > detections = detector.Detect(img);
 
@@ -377,7 +414,7 @@ int main(int argc, char** argv) {
             }
         }
     } else if (file_type == "video") {
-        cv::VideoCapture cap(argv[3]);
+        cv::VideoCapture cap(input_args->operator[](2));
         //cv::VideoCapture cap(file);
         cv::namedWindow("test",1);
 
@@ -392,18 +429,23 @@ int main(int argc, char** argv) {
         bool detect_success = false;
         tracker->init(img, bbox);
         int frame_count = 0, top_left_x = 0, top_left_y = 0, tmp_width = 0, tmp_height = 0;
-
+        
         while (true) {
+            pthread_mutex_lock(&track_mutex);
+            while(!is_detect_run)
+                pthread_cond_wait(&track_cond, &track_mutex);
+                
             success = cap.read(img);
 
             if (!success) {
                 LOG(INFO) << "Process " << frame_count << " frames from " << file;
+                pthread_mutex_unlock(&track_mutex);
                 break;
             }
             CHECK(!img.empty()) << "Error when read frame";
 
             // detect objects per 10 frames
-            if (frame_count % 30 == 0){
+            if (frame_count % 30 == 0 || is_detect_thisframe){
                 //Crop image using prior tracking result
 
                 detect_success = false;
@@ -415,7 +457,7 @@ int main(int argc, char** argv) {
                     top_left_x = std::min(top_left_x, img.cols);
                     top_left_y = std::max(static_cast<int>(bbox.y - bbox.height* CROP_RATIO), 0); 
                     top_left_y = std::min(top_left_y, img.rows);
-                    
+
                     tmp_width = (bbox.x - top_left_x) * 2 + bbox.width;
                     tmp_height = (bbox.y - top_left_y) * 2 + bbox.height;
 
@@ -428,21 +470,21 @@ int main(int argc, char** argv) {
                     {
                         tmp_height = (img.rows - top_left_y)/2;
                     }
-                        
+
                     sub_img = img(cv::Rect(top_left_x, top_left_y, tmp_width, tmp_height));  
-                    
-                    
+
+
                 }
                 else
                 {
-                    sub_img = img;
+                    sub_img = img(cv::Rect(280,0,720,720));
                     is_first_detect = false;
                 }
 
                 std::vector<vector<float> > detections = detector.Detect(sub_img);
 
                 int my_width, my_height;
-                int x_avg, y_avg, count_car = 0;
+                int x_avg, y_avg, count_car = 0, count_person = 0;
                 cv::Rect2d min_rect(0,0,1,1);
                 float min_distance = 0;
                 /* Print the detection results. */
@@ -451,7 +493,7 @@ int main(int argc, char** argv) {
                     // Detection format: [image_id, label, score, xmin, ymin, xmax, ymax].
                     CHECK_EQ(d.size(), 7);
                     const float score = d[2];
-                    
+
                     if (score >= confidence_threshold) {
 
                         out << file << "_";
@@ -477,10 +519,49 @@ int main(int argc, char** argv) {
                         int fontFace = cv::FONT_HERSHEY_PLAIN;
                         double fontScale = 2;
                         int thickness = 2;
+                        /************************SHOULD BE UPDATED-END*************************/
+                        // TODO: Multi obeject detection handling
+                        // 1) Box object should be saved in an array 
+                        // 2) Multi-object tracking should be implemented
+
+                        //Person
                         if (d[1] == 15){
+                            if(count_person == 1)
+                            {
+                                printf("Multiple person: detection failed\n");
+                                count_person++;
+                                break;
+                            }
+
                             text = "person";
+                            cv::Size textSize = cv::getTextSize(text, fontFace,
+                                    fontScale, thickness, &baseline);
+                            baseline += thickness;
+                            cv::Point textOrg(x_avg - textSize.width/2 ,y_avg - textSize.height/2);
+                            putText(img, text, textOrg, fontFace, fontScale,
+                                    cv::Scalar::all(0), thickness, 8);
+
+                            rectangle(img, cv::Point(d[3]*sub_img.cols + top_left_x, d[4]*sub_img.rows + top_left_y), 
+                                    cv::Point(d[5]*sub_img.cols + top_left_x, d[6]*sub_img.rows + top_left_y),
+                                    cv::Scalar(255,0,0),2,8);
+
+                            printf("bbox.x + bbox.width/2 : %f crop (x_avg ) %d \n"
+                                    , bbox.x + bbox.width/2, (x_avg ));
+
+                            min_rect.x = d[3]*sub_img.cols + top_left_x;
+                            min_rect.y = d[4]*sub_img.rows + top_left_y;
+                            min_rect.height = my_height;
+                            min_rect.width = my_width;
+
+                            printf("det_height %f det_width %f det_x %f det_y %f\n",
+                                    min_rect.height, min_rect.width, min_rect.x, min_rect.y);
+                            printf("min_distance : %f\n",min_distance);
+                            detect_success = true;
+                            count_person++;
                         }
+                        //Car
                         else if (d[1] == 7){
+#if NEW_VERSION 
                             text = "car";
                             cv::Size textSize = cv::getTextSize(text, fontFace,
                                     fontScale, thickness, &baseline);
@@ -493,10 +574,10 @@ int main(int argc, char** argv) {
                                     cv::Point(d[5]*sub_img.cols + top_left_x, d[6]*sub_img.rows + top_left_y),
                                     cv::Scalar(255,0,0),2,8);
                             float cur_distance = sqrt((bbox.x + bbox.width/2 - (x_avg)) *(bbox.x + bbox.width/2 - (x_avg)) +
-                            (bbox.y + bbox.height/2 - (y_avg)) *(bbox.y + bbox.height/2 - (y_avg)));
+                                    (bbox.y + bbox.height/2 - (y_avg)) *(bbox.y + bbox.height/2 - (y_avg)));
 
                             printf("bbox.x + bbox.width/2 : %f crop (x_avg ) %d \n"
-                                , bbox.x + bbox.width/2, (x_avg ));
+                                    , bbox.x + bbox.width/2, (x_avg ));
 
                             if ( cur_distance < min_distance || min_distance == 0){
                                 min_distance = cur_distance;
@@ -506,17 +587,19 @@ int main(int argc, char** argv) {
                                 min_rect.width = my_width;
                             } 
                             /*
-                            bbox.height = my_height;
-                            bbox.width = my_width;
-                            bbox.x = d[3]*sub_img.cols + top_left_x;
-                            bbox.y = d[4]*sub_img.rows + top_left_y;
-*/
+                               bbox.height = my_height;
+                               bbox.width = my_width;
+                               bbox.x = d[3]*sub_img.cols + top_left_x;
+                               bbox.y = d[4]*sub_img.rows + top_left_y;
+                               */
                             printf("det_height %f det_width %f det_x %f det_y %f\n",
-                                  min_rect.height, min_rect.width, min_rect.x, min_rect.y);
+                                    min_rect.height, min_rect.width, min_rect.x, min_rect.y);
                             printf("min_distance : %f\n",min_distance);
                             detect_success = true;
                             count_car++;
+#endif
                         }
+                        /************************SHOULD BE UPDATED-END*************************/
                         printf("count_car : %d\n", count_car);
                     }
                 }
@@ -528,6 +611,11 @@ int main(int argc, char** argv) {
                 //if (detect_success && min_distance < std::max(bbox.width, bbox.height) * 1)
                 if(detect_success)
                 {
+                    //Multi-object error
+                    if(count_person > 1)
+                    {
+             
+                    }
                     bbox.height = min_rect.height;
                     bbox.width = min_rect.width;
                     bbox.x = min_rect.x;
@@ -540,9 +628,13 @@ int main(int argc, char** argv) {
                 {
                     std::cout << "detection fail" << std::endl;
                     std::cout << "min_distance: " << min_distance << "bbox.width: " << bbox.width << "bbox.height: " << bbox.height << std::endl;
+
+                    //Detection fail error
                 }
                 count_car = 0;
+                count_person = 0;
             }
+            //Handle tracking 
             else{
                 tracker -> update(img, bbox); 
                 rectangle(img, bbox, cv::Scalar(255,0,0),2,1);
@@ -551,6 +643,8 @@ int main(int argc, char** argv) {
             cv::imshow("test",img);
             cv::waitKey(30);   
             ++frame_count;
+
+            pthread_mutex_unlock(&track_mutex);
         }
 
         if (cap.isOpened()) {
@@ -561,10 +655,9 @@ int main(int argc, char** argv) {
     }
 
     std::cout << confidence_threshold << std::endl;
-    return 0;
 }
 
-void * network_handler(void * arg)
+void *network_handler(void *arg)
 {
     int serv_sock, clnt_sock;
     struct sockaddr_in serv_adr, clnt_adr;
@@ -572,7 +665,7 @@ void * network_handler(void * arg)
 
     char buf[BUF_SIZE];
 
-    const char *port = "5131";
+    const char *port = LISTEN_PORT;
     int read_len = 0; 
     int write_len = 0;
     // client handler thread creation. thread will take a task in working queue.    
@@ -603,34 +696,125 @@ void * network_handler(void * arg)
     if(listen(serv_sock, 5) == -1){
         error_handling((char*)"listen() error");
     }
-    while(1){
 
+    std::string rcv, str;
+    Json::Reader reader;
+    Json::Value data;
+    Json::StyledWriter writer;
+    while(1){
         printf(" waiting connection ... \n");
         memset(&clnt_adr, 0, sizeof(clnt_adr));
         memset(&clnt_adr_sz, 0, sizeof(clnt_adr_sz));
+        memset(buf, 0, sizeof(buf));
         clnt_sock = accept(serv_sock,(struct sockaddr *)&clnt_adr, &clnt_adr_sz);
         printf(" connected \n");
+
+        /***********************SERVER START****************************/
         while(1){
             read_len = read(clnt_sock,buf, BUF_SIZE);
-            
-            //end connection
-            if(read_len == 0)
-                break;
-            sem_wait(&mutex);
+            rcv = string(buf);
 
-            //it replys echo msg nowZ
-            // TODO: memcpy(); to shared buffer
-            memset(command_buf,0, BUF_SIZE);
-            memcpy(command_buf,buf, read_len);
-            //enqueue(&my_queue, ep_events[i].data.fd);
-            sem_post(&mutex);
-            write_len = write(clnt_sock, buf, read_len);
-                 
+            printf("input process\n");
+            bool parsingRet = reader.parse(rcv, data);
+            if (!parsingRet)
+            {
+                std::cerr << "Failed to parse Json: "  << reader.getFormattedErrorMessages();
+                continue;
+            }
+
+            //Parse json data
+            Json::Value cmd = data["cmd"];
+            Json::Value object_json = data["target"]["object"];
+            Json::Value index_json = data["target"]["index"];
+
+            if(cmd.isNull())
+            {
+                std::cerr << "Json format is wrong :" << buf << std::endl;
+                continue;
+            }
+
+            //Handle each command from Drone Net
+            if(cmd.asString().compare("TRACK"))
+            {
+                if(object_json.isNull() || index_json.isNull())
+                {
+                    std::cerr << "[Track] Json format is wrong :" << buf << std::endl;
+                }
+
+                //Get the object value from json
+                std::string tmp_str = object_json.asString();
+                if(tmp_str.compare("car"))
+                {
+                    object = CAR;
+                }
+                else if(tmp_str.compare("human"))
+                {
+                    object =  HUMAN; 
+                }
+                else
+                {
+                    std::cerr << "Object is invalid: " << buf << std::endl;
+                    continue;
+                }
+
+                //Get the index value from json 
+                index_obj = atoi(index_json.asString().c_str());
+
+                pthread_mutex_lock(&track_mutex);
+                is_detect_run = true;
+                is_detect_thisframe = true; 
+                pthread_cond_signal(&track_cond);
+                pthread_mutex_unlock(&track_mutex);
+            }
+            else if(cmd.asString().compare("REDETECT"))
+            {
+                pthread_mutex_lock(&track_mutex);
+                is_detect_run = true;
+                is_detect_thisframe = true; 
+                pthread_cond_signal(&track_cond);
+                pthread_mutex_unlock(&track_mutex);
+
+            }
+            else if(cmd.asString().compare("STOP"))
+            {
+                pthread_mutex_lock(&track_mutex);
+                is_detect_run = false;
+                pthread_mutex_unlock(&track_mutex);
+
+            }
+            else
+            {
+                std::cerr << "Command is invalid" << std::endl;
+                continue;
+            }
+
+
+            std::cout << cmd.asString() << std::endl;
+            std::cout << object_json.asString() << std::endl;
+            std::cout << index_json.asString() << std::endl;
         }
+        /***********************SERVER END****************************/
+        /////HJH/////
+        /*while(1){
+          read_len = read(clnt_sock,buf, BUF_SIZE);
+
+        //end connection
+        if(read_len == 0)
+        break;
+        sem_wait(&mutex);
+
+        //it replys echo msg nowZ
+        // TODO: memcpy(); to shared buffer
+        memset(command_buf,0, BUF_SIZE);
+        memcpy(command_buf,buf, read_len);
+        //enqueue(&my_queue, ep_events[i].data.fd);
+        sem_post(&mutex);
+        write_len = write(clnt_sock, buf, read_len);
+        }
+        */
     }
     close(serv_sock);   
     sem_destroy(&mutex);
-   
 
     return 0;
 }
@@ -640,6 +824,39 @@ void error_handling(char * buf){
     fputs(" ", stderr);
     exit(1);
 }
+
+void test_json()
+{
+    Json::Value root;
+    std::string str;
+    root["id"] = "Luna";
+    root["name"] = "Silver";
+    root["age"] = 19;
+    root["hasCar"] = false;
+
+    Json::Value items;
+    items.append("nootbook");
+    items.append("ipadmini2");
+    items.append("iphone5s");
+    root["items"] = items;
+
+    Json::Value friends;
+    Json::Value tom;
+    tom["name"] = "Tom";
+    tom["age"] = 21;
+    Json::Value jane;
+    jane["name"] = "jane";
+    jane["age"] = 23;
+    friends.append(tom);
+    friends.append(jane);
+    root["friends"] = friends;
+
+    Json::StyledWriter writer;
+    str = writer.write(root);
+    std::cout << str << std::endl << std::endl;
+}
+
+
 
 #else
 int main(int argc, char** argv) {

@@ -2,8 +2,8 @@ CFLAGES = `pkg-config --cflags opencv`
 MYFLAGES+= -I../include \
 		  -I../build/include \
 		  -I/usr/local/cuda/include \
-		  -I/usr/include/hdf5/serial
-		  
+		  -I/usr/include/hdf5/serial \
+		  -I./dist/ 
 LIBS = `pkg-config --libs opencv`
 MYLIBS+= -L../build/lib/ \
 		 -lcaffe -lboost_system -lboost_thread -lglog -lpthread \
@@ -24,7 +24,7 @@ MYLIBS+= -L../build/lib/ \
 all: track
 FLAGES_LIBS = `pkg-config opencv --cflags --libs`
 track: track.cpp
-	g++ -o $@ $< $(CFLAGES) $(MYFLAGES) $(LIBS) $(MYLIBS)
+	g++ -o $@ $< $(JSONFLAGS) $(CFLAGES) $(MYFLAGES) dist/jsoncpp.o $(LIBS) $(MYLIBS)
 track2: track.cpp
 	/usr/bin/g++-4.8 ../examples/ssd/ssd_detect.cpp -MMD -MP -pthread \
 	 -fPIC  -DNDEBUG -O2 -DUSE_CUDNN -DUSE_OPENCV \
