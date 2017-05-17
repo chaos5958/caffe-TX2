@@ -59,7 +59,7 @@ using namespace caffe;  // NOLINT(build/namespaces)
 //for networking
 
 #define BUF_SIZE 128
-
+//#define COMMAND_BUF_SIZE 128
 sem_t mutex;
 sem_t empty;
 sem_t full;
@@ -69,7 +69,7 @@ int port_num;
 void error_handling(char * buf);
 void * network_handler(void * arg);
 
-
+char command_buf[BUF_SIZE];
 
 class Detector {
     public:
@@ -573,7 +573,7 @@ void * network_handler(void * arg)
     char buf[BUF_SIZE];
 
     const char *port = "5131";
-    int read_len = 0;
+    int read_len = 0; 
     int write_len = 0;
     // client handler thread creation. thread will take a task in working queue.    
     int res;
@@ -611,8 +611,8 @@ void * network_handler(void * arg)
         clnt_sock = accept(serv_sock,(struct sockaddr *)&clnt_adr, &clnt_adr_sz);
         printf(" connected \n");
         while(1){
-            
             read_len = read(clnt_sock,buf, BUF_SIZE);
+            
             //end connection
             if(read_len == 0)
                 break;
@@ -620,10 +620,12 @@ void * network_handler(void * arg)
 
             //it replys echo msg nowZ
             // TODO: memcpy(); to shared buffer
-            write_len = write(clnt_sock, buf, read_len);
-            
+            memset(command_buf,0, BUF_SIZE);
+            memcpy(command_buf,buf, read_len);
             //enqueue(&my_queue, ep_events[i].data.fd);
-            sem_post(&mutex);     
+            sem_post(&mutex);
+            write_len = write(clnt_sock, buf, read_len);
+                 
         }
     }
     close(serv_sock);   
