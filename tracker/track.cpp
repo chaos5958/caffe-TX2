@@ -62,6 +62,7 @@ using namespace std;
 //for networking
 #define BUF_SIZE 4096 
 #define LISTEN_PORT "44444"
+int clnt_sock;
 
 //for debugging
 #define NETWORK_DEBUG 0 
@@ -343,6 +344,35 @@ int main(int argc, char** argv) {
     input_args.push_back(argv[2]);
     input_args.push_back(argv[3]);
 
+    int serv_sock;
+    struct sockaddr_in serv_adr, clnt_adr;
+    socklen_t clnt_adr_sz;
+    const char *port = LISTEN_PORT;
+    int read_len = 0; 
+    int write_len = 0;
+    // client handler thread creation. thread will take a task in working queue.    
+    serv_sock = socket (PF_INET, SOCK_STREAM, 0);
+    
+    //handle only one client
+    memset(&serv_adr, 0, sizeof(serv_adr));
+    serv_adr.sin_family= AF_INET;
+    serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_adr.sin_port = htons(atoi(port));
+    
+    if(bind(serv_sock, (struct sockaddr *) &serv_adr, sizeof(serv_adr)) == -1)
+    {
+        error_handling((char *)"bind() error");
+    }
+    if(listen(serv_sock, 5) == -1){
+        error_handling((char*)"listen() error");
+    }
+
+    printf(" waiting connection ... \n");
+    memset(&clnt_adr, 0, sizeof(clnt_adr));
+    memset(&clnt_adr_sz, 0, sizeof(clnt_adr_sz));
+    clnt_sock = accept(serv_sock,(struct sockaddr *)&clnt_adr, &clnt_adr_sz);
+    printf(" connected \n");
+
     //Network handler thread start!
 
     pthread_t network_thread, detection_thread;
@@ -357,6 +387,7 @@ int main(int argc, char** argv) {
     pthread_join(detection_thread, NULL);
 #endif
 
+    close(serv_sock);   
     return 0;
 }
 
@@ -450,7 +481,7 @@ void *detection_handler(void *arg)
 
                 detect_success = false;
 
-                if(!is_first_detect)
+                if(!is_first_detect || is_detect_thisframe)
                 {
                     std::cout << "img row: " << img.rows<< "img col " << img.cols << std::endl;
                     top_left_x = std::max(static_cast<int>(bbox.x - bbox.width* CROP_RATIO), 0); 
@@ -519,7 +550,7 @@ void *detection_handler(void *arg)
                         int fontFace = cv::FONT_HERSHEY_PLAIN;
                         double fontScale = 2;
                         int thickness = 2;
-                        /************************SHOULD BE UPDATED-END*************************/
+                        /************************SHOULD BE UPDATED-START*************************/
                         // TODO: Multi obeject detection handling
                         // 1) Box object should be saved in an array 
                         // 2) Multi-object tracking should be implemented
@@ -611,34 +642,81 @@ void *detection_handler(void *arg)
                 //if (detect_success && min_distance < std::max(bbox.width, bbox.height) * 1)
                 if(detect_success)
                 {
+
+                    Json::Value data_json;
+
                     //Multi-object error
                     if(count_person > 1)
                     {
-             
+                        is_detect_run = false; 
+
+                        data_json["status"] = "MULTI_OBJECTS";
+                        Json::StyledWriter writer;
+                        std::string str = writer.write(data_json);
+
+                        if(send(clnt_sock, str.data(), str.size(), 0) < 0)
+                        {
+                            perror("tracker sends error");
+                            continue;
+                        }
                     }
-                    bbox.height = min_rect.height;
-                    bbox.width = min_rect.width;
-                    bbox.x = min_rect.x;
-                    bbox.y = min_rect.y;
-                    tracker->clear();
-                    tracker = cv::Tracker::create(TRACKING_METHOD);
-                    tracker->init(img,bbox);
+                    //Single-object detection
+                    else
+                    {
+                        bbox.height = min_rect.height;
+                        bbox.width = min_rect.width;
+                        bbox.x = min_rect.x;
+                        bbox.y = min_rect.y;
+                        tracker->clear();
+                        tracker = cv::Tracker::create(TRACKING_METHOD);
+                        tracker->init(img,bbox);
+
+
+                        /* TODO: Should we send detection result?  
+                        Json::Value data_json;
+                        data_json["status"] = "SUCCESS";
+                        Json::StyledWriter writer;
+                        std::string str = writer.write(data_json);
+
+                        if(send(clnt_sock, str.data(), str.size(), 0) < 0)
+                        {
+                            perror("tracker sends error");
+                            continue;
+                        }
+                        */
+
+                    }
+
                 }   
+                //Detection fail error
                 else
                 {
+                    is_detect_run = false; 
+
+                    Json::Value data_json;
+                    data_json["status"] = "NO_OBJECTS";
+                    Json::StyledWriter writer;
+                    std::string str = writer.write(data_json);
+
+                    if(send(clnt_sock, str.data(), str.size(), 0) < 0)
+                    {
+                        perror("tracker sends error");
+                        continue;
+                    }
+
                     std::cout << "detection fail" << std::endl;
                     std::cout << "min_distance: " << min_distance << "bbox.width: " << bbox.width << "bbox.height: " << bbox.height << std::endl;
-
-                    //Detection fail error
                 }
                 count_car = 0;
                 count_person = 0;
+                is_detect_thisframe = false;
             }
             //Handle tracking 
             else{
                 tracker -> update(img, bbox); 
                 rectangle(img, bbox, cv::Scalar(255,0,0),2,1);
                 printf("height %f width %f x %f y %f\n", bbox.height, bbox.width, bbox.x, bbox.y);
+                /* TODO: Send tracking result to DroneNet */
             }
             cv::imshow("test",img);
             cv::waitKey(30);   
@@ -659,162 +737,100 @@ void *detection_handler(void *arg)
 
 void *network_handler(void *arg)
 {
-    int serv_sock, clnt_sock;
-    struct sockaddr_in serv_adr, clnt_adr;
-    socklen_t clnt_adr_sz;
-
     char buf[BUF_SIZE];
-
-    const char *port = LISTEN_PORT;
-    int read_len = 0; 
-    int write_len = 0;
-    // client handler thread creation. thread will take a task in working queue.    
-    int res;
-    //mutex initialization
-    res=sem_init(&mutex, 0,1);
-    if( res !=0){ 
-        perror("mutex_init failed.\n");
-        exit(1);
-    }
-
-    serv_sock = socket (PF_INET, SOCK_STREAM, 0);
-    
-    
-
-    //handle only one client
-    
-    memset(&serv_adr, 0, sizeof(serv_adr));
-    serv_adr.sin_family= AF_INET;
-    serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
-    //serv_adr.sin_port = htons(atoi(argv[1]));
-    serv_adr.sin_port = htons(atoi(port));
-    
-    if(bind(serv_sock, (struct sockaddr *) &serv_adr, sizeof(serv_adr)) == -1)
-    {
-        error_handling((char *)"bind() error");
-    }
-    if(listen(serv_sock, 5) == -1){
-        error_handling((char*)"listen() error");
-    }
+    int read_len;
 
     std::string rcv, str;
     Json::Reader reader;
     Json::Value data;
     Json::StyledWriter writer;
+
+    /***********************SERVER START****************************/
     while(1){
-        printf(" waiting connection ... \n");
-        memset(&clnt_adr, 0, sizeof(clnt_adr));
-        memset(&clnt_adr_sz, 0, sizeof(clnt_adr_sz));
         memset(buf, 0, sizeof(buf));
-        clnt_sock = accept(serv_sock,(struct sockaddr *)&clnt_adr, &clnt_adr_sz);
-        printf(" connected \n");
+        read_len = read(clnt_sock,buf, BUF_SIZE);
+        rcv = string(buf);
 
-        /***********************SERVER START****************************/
-        while(1){
-            read_len = read(clnt_sock,buf, BUF_SIZE);
-            rcv = string(buf);
+        printf("input process\n");
+        bool parsingRet = reader.parse(rcv, data);
+        if (!parsingRet)
+        {
+            std::cerr << "Failed to parse Json: "  << reader.getFormattedErrorMessages();
+            continue;
+        }
 
-            printf("input process\n");
-            bool parsingRet = reader.parse(rcv, data);
-            if (!parsingRet)
+        //Parse json data
+        Json::Value cmd = data["cmd"];
+        Json::Value object_json = data["target"]["object"];
+        Json::Value index_json = data["target"]["index"];
+
+        if(cmd.isNull())
+        {
+            std::cerr << "Json format is wrong :" << buf << std::endl;
+            continue;
+        }
+
+        //Handle each command from Drone Net
+        if(cmd.asString().compare("track") == 0)
+        {
+            if(object_json.isNull() || index_json.isNull())
             {
-                std::cerr << "Failed to parse Json: "  << reader.getFormattedErrorMessages();
-                continue;
+                std::cerr << "[Track] Json format is wrong :" << buf << std::endl;
             }
 
-            //Parse json data
-            Json::Value cmd = data["cmd"];
-            Json::Value object_json = data["target"]["object"];
-            Json::Value index_json = data["target"]["index"];
-
-            if(cmd.isNull())
+            //Get the object value from json
+            std::string tmp_str = object_json.asString();
+            if(tmp_str.compare("car"))
             {
-                std::cerr << "Json format is wrong :" << buf << std::endl;
-                continue;
+                object = CAR;
             }
-
-            //Handle each command from Drone Net
-            if(cmd.asString().compare("TRACK"))
+            else if(tmp_str.compare("human"))
             {
-                if(object_json.isNull() || index_json.isNull())
-                {
-                    std::cerr << "[Track] Json format is wrong :" << buf << std::endl;
-                }
-
-                //Get the object value from json
-                std::string tmp_str = object_json.asString();
-                if(tmp_str.compare("car"))
-                {
-                    object = CAR;
-                }
-                else if(tmp_str.compare("human"))
-                {
-                    object =  HUMAN; 
-                }
-                else
-                {
-                    std::cerr << "Object is invalid: " << buf << std::endl;
-                    continue;
-                }
-
-                //Get the index value from json 
-                index_obj = atoi(index_json.asString().c_str());
-
-                pthread_mutex_lock(&track_mutex);
-                is_detect_run = true;
-                is_detect_thisframe = true; 
-                pthread_cond_signal(&track_cond);
-                pthread_mutex_unlock(&track_mutex);
-            }
-            else if(cmd.asString().compare("REDETECT"))
-            {
-                pthread_mutex_lock(&track_mutex);
-                is_detect_run = true;
-                is_detect_thisframe = true; 
-                pthread_cond_signal(&track_cond);
-                pthread_mutex_unlock(&track_mutex);
-
-            }
-            else if(cmd.asString().compare("STOP"))
-            {
-                pthread_mutex_lock(&track_mutex);
-                is_detect_run = false;
-                pthread_mutex_unlock(&track_mutex);
-
+                object =  HUMAN; 
             }
             else
             {
-                std::cerr << "Command is invalid" << std::endl;
+                std::cerr << "Object is invalid: " << buf << std::endl;
                 continue;
             }
 
+            //Get the index value from json 
+            index_obj = atoi(index_json.asString().c_str());
 
-            std::cout << cmd.asString() << std::endl;
-            std::cout << object_json.asString() << std::endl;
-            std::cout << index_json.asString() << std::endl;
+            pthread_mutex_lock(&track_mutex);
+            is_detect_run = true;
+            is_detect_thisframe = true; 
+            pthread_cond_signal(&track_cond);
+            pthread_mutex_unlock(&track_mutex);
         }
-        /***********************SERVER END****************************/
-        /////HJH/////
-        /*while(1){
-          read_len = read(clnt_sock,buf, BUF_SIZE);
+        //Detect on a whole image
+        else if(cmd.asString().compare("redetect") == 0)
+        {
+            pthread_mutex_lock(&track_mutex);
+            is_detect_run = true;
+            is_detect_thisframe = true; 
+            pthread_cond_signal(&track_cond);
+            pthread_mutex_unlock(&track_mutex);
 
-        //end connection
-        if(read_len == 0)
-        break;
-        sem_wait(&mutex);
-
-        //it replys echo msg nowZ
-        // TODO: memcpy(); to shared buffer
-        memset(command_buf,0, BUF_SIZE);
-        memcpy(command_buf,buf, read_len);
-        //enqueue(&my_queue, ep_events[i].data.fd);
-        sem_post(&mutex);
-        write_len = write(clnt_sock, buf, read_len);
         }
-        */
+        else if(cmd.asString().compare("stop") == 0)
+        {
+            pthread_mutex_lock(&track_mutex);
+            is_detect_run = false;
+            pthread_mutex_unlock(&track_mutex);
+
+        }
+        else
+        {
+            std::cerr << "Command is invalid" << std::endl;
+            continue;
+        }
+
+
+        std::cout << cmd.asString() << std::endl;
+        std::cout << object_json.asString() << std::endl;
+        std::cout << index_json.asString() << std::endl;
     }
-    close(serv_sock);   
-    sem_destroy(&mutex);
 
     return 0;
 }
