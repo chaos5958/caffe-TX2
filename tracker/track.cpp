@@ -329,7 +329,12 @@ int main(int argc, char** argv) {
     pthread_t network_thread;
     pthread_create(&network_thread, NULL, network_handler, NULL);
     pthread_detach(network_thread);
-
+    
+   /* while(1)
+    {
+        sleep(1);
+    }
+    */
     // Initialize the network.
     Detector detector(model_file, weights_file, mean_file, mean_value);
 
@@ -580,6 +585,11 @@ void * network_handler(void * arg)
     }
 
     serv_sock = socket (PF_INET, SOCK_STREAM, 0);
+    
+    
+
+    //handle only one client
+    
     memset(&serv_adr, 0, sizeof(serv_adr));
     serv_adr.sin_family= AF_INET;
     serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -593,22 +603,32 @@ void * network_handler(void * arg)
     if(listen(serv_sock, 5) == -1){
         error_handling((char*)"listen() error");
     }
-    clnt_sock = accept(serv_sock,(struct sockaddr *)&clnt_adr, &clnt_adr_sz);
-
     while(1){
-        read_len = read(clnt_sock,buf, BUF_SIZE);
-        sem_wait(&mutex);
 
-        //it replys echo msg nowZ
-        // TODO: memcpy(); to shared buffer
-        write_len = write(clnt_sock, buf, read_len);
-        
-        //enqueue(&my_queue, ep_events[i].data.fd);
-        sem_post(&mutex);     
+        printf(" waiting connection ... \n");
+        memset(&clnt_adr, 0, sizeof(clnt_adr));
+        memset(&clnt_adr_sz, 0, sizeof(clnt_adr_sz));
+        clnt_sock = accept(serv_sock,(struct sockaddr *)&clnt_adr, &clnt_adr_sz);
+        printf(" connected \n");
+        while(1){
+            
+            read_len = read(clnt_sock,buf, BUF_SIZE);
+            //end connection
+            if(read_len == 0)
+                break;
+            sem_wait(&mutex);
+
+            //it replys echo msg nowZ
+            // TODO: memcpy(); to shared buffer
+            write_len = write(clnt_sock, buf, read_len);
+            
+            //enqueue(&my_queue, ep_events[i].data.fd);
+            sem_post(&mutex);     
+        }
     }
+    close(serv_sock);   
     sem_destroy(&mutex);
    
-    close(serv_sock);
 
     return 0;
 }
