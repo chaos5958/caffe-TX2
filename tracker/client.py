@@ -6,15 +6,38 @@ from threading import Thread
 import threading
 import json
 
+
+
+
 HOST_IP = '127.0.0.1'
 HOST_PORT = 44444
 FLAG = True
+
+def recv_msg():
+    while True:
+        time.sleep(1)
+        data = conn.recv(1024)
+        input = json.loads(data)
+        print ' '
+        print "recv msg", repr(data)
+        #pprint(input)
+        #print "cmd", input['cmd'], "data", input['target']['index']
+        
+        if eq(input['cmd'], "MULTI"):
+            print "MULTI"
+        elif eq(input['cmd'], "NO_OBJ"):
+            print "NO_OBJ"
+        elif eq(input['cmd'], "SUCCESS"):
+            x_min  = input['data'][0]
+            y_min  = input['data'][1]
+            width  = input['data'][2]
+            height = input['data'][3]
 
 conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 conn.connect((HOST_IP, HOST_PORT))
 
 try:
-    # threading._start_new_thread(sending_msg, ())
+    threading._start_new_thread(recv_msg, ())
     while FLAG:
         # time.sleep(1)
         #data = conn.recv(1024)
@@ -23,14 +46,14 @@ try:
         print "Enter command track, redetect, stop"
         command_state = 0
         while 1:
-            input = raw_input()
-            if input.startswith('track'):
+            keyboard_input = raw_input()
+            if keyboard_input.startswith('track'):
                 command_state = 1
                 break
-            elif input.startswith('redetect'):
+            elif keyboard_input.startswith('redetect'):
                 command_state = 2
                 break
-            elif input.startswith('stop'):
+            elif keyboard_input.startswith('stop'):
                 command_state = 3
                 break
             else:
