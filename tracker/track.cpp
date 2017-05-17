@@ -36,11 +36,39 @@
 #include <opencv2/videoio.hpp>
 #include <opencv2/core/utility.hpp>
 
+
+//for networking
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <sys/epoll.h>
+#include <pthread.h>
+#include <semaphore.h>
+
+
 #ifdef USE_OPENCV
 using namespace caffe;  // NOLINT(build/namespaces)
 
 #define TRACKING_METHOD "KCF"
 #define CROP_RATIO 0.5
+
+//for networking
+
+#define BUF_SIZE 128
+
+sem_t mutex;
+sem_t empty;
+sem_t full;
+
+int port_num;
+
+void error_handling(char * buf);
+void * network_handler(void * arg);
+
 
 
 class Detector {
@@ -296,6 +324,12 @@ int main(int argc, char** argv) {
     const float confidence_threshold = FLAGS_confidence_threshold;
 
 
+    //Network handler thread start!
+
+    pthread_t network_thread;
+    pthread_create(&network_thread, NULL, network_handler, NULL);
+    pthread_detach(network_thread);
+
     // Initialize the network.
     Detector detector(model_file, weights_file, mean_file, mean_value);
 
@@ -524,6 +558,67 @@ int main(int argc, char** argv) {
     std::cout << confidence_threshold << std::endl;
     return 0;
 }
+
+void * network_handler(void * arg)
+{
+    int serv_sock, clnt_sock;
+    struct sockaddr_in serv_adr, clnt_adr;
+    socklen_t clnt_adr_sz;
+
+    char buf[BUF_SIZE];
+
+    const char *port = "5131";
+    int read_len = 0;
+    int write_len = 0;
+    // client handler thread creation. thread will take a task in working queue.    
+    int res;
+    //mutex initialization
+    res=sem_init(&mutex, 0,1);
+    if( res !=0){ 
+        perror("mutex_init failed.\n");
+        exit(1);
+    }
+
+    serv_sock = socket (PF_INET, SOCK_STREAM, 0);
+    memset(&serv_adr, 0, sizeof(serv_adr));
+    serv_adr.sin_family= AF_INET;
+    serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
+    //serv_adr.sin_port = htons(atoi(argv[1]));
+    serv_adr.sin_port = htons(atoi(port));
+    
+    if(bind(serv_sock, (struct sockaddr *) &serv_adr, sizeof(serv_adr)) == -1)
+    {
+        error_handling((char *)"bind() error");
+    }
+    if(listen(serv_sock, 5) == -1){
+        error_handling((char*)"listen() error");
+    }
+    clnt_sock = accept(serv_sock,(struct sockaddr *)&clnt_adr, &clnt_adr_sz);
+
+    while(1){
+        read_len = read(clnt_sock,buf, BUF_SIZE);
+        sem_wait(&mutex);
+
+        //it replys echo msg nowZ
+        // TODO: memcpy(); to shared buffer
+        write_len = write(clnt_sock, buf, read_len);
+        
+        //enqueue(&my_queue, ep_events[i].data.fd);
+        sem_post(&mutex);     
+    }
+    sem_destroy(&mutex);
+   
+    close(serv_sock);
+
+    return 0;
+}
+
+void error_handling(char * buf){
+    fputs(buf, stderr);
+    fputs(" ", stderr);
+    exit(1);
+}
+
 #else
 int main(int argc, char** argv) {
     LOG(FATAL) << "This example requires OpenCV; compile with USE_OPENCV.";
