@@ -21,17 +21,18 @@ def recv_msg():
         print ' '
         print "recv msg", repr(data)
         #pprint(input)
-        #print "cmd", input['cmd'], "data", input['target']['index']
-        
-        if eq(input['cmd'], "MULTI"):
+        #print "status", input['cmd'], "data", input['target']['index']
+
+        if input['status'] is "MULTI_OBJECTS":
             print "MULTI"
-        elif eq(input['cmd'], "NO_OBJ"):
+        elif input['status'] is "NO_OBJECTS":
             print "NO_OBJ"
-        elif eq(input['cmd'], "SUCCESS"):
+        elif input['status'] is "SUCCESS":
             x_min  = input['data'][0]
             y_min  = input['data'][1]
             width  = input['data'][2]
             height = input['data'][3]
+            print x_min, y_min, width, height
 
 conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 conn.connect((HOST_IP, HOST_PORT))

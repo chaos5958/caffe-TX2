@@ -716,7 +716,22 @@ void *detection_handler(void *arg)
                 tracker -> update(img, bbox); 
                 rectangle(img, bbox, cv::Scalar(255,0,0),2,1);
                 printf("height %f width %f x %f y %f\n", bbox.height, bbox.width, bbox.x, bbox.y);
-                /* TODO: Send tracking result to DroneNet */
+
+                Json::Value data_json;
+                data_json["status"] = "SUCCESS";
+                data_json["data"]["x_min"] = bbox.x;
+                data_json["data"]["y_min"] = bbox.y;
+                data_json["data"]["width"] = bbox.width;
+                data_json["data"]["height"] = bbox.height;
+
+                Json::StyledWriter writer;
+                std::string str = writer.write(data_json);
+
+                if(send(clnt_sock, str.data(), str.size(), 0) < 0)
+                {
+                    perror("tracker sends error");
+                    continue;
+                }
             }
             cv::imshow("test",img);
             cv::waitKey(30);   
