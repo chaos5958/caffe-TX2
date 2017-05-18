@@ -764,6 +764,10 @@ void *network_handler(void *arg)
     while(1){
         memset(buf, 0, sizeof(buf));
         read_len = read(clnt_sock,buf, BUF_SIZE);
+        if (read_len == 0){
+            std::cout << "Connection closed " <<std::endl;
+            break;
+        }
         rcv = string(buf);
 
         printf("input process\n");
