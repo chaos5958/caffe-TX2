@@ -52,6 +52,9 @@
 //for json
 #include <json/json.h>
 
+//for debugging
+#include <stdarg.h>
+
 #ifdef USE_OPENCV
 using namespace caffe;  // NOLINT(build/namespaces)
 using namespace std;
@@ -64,8 +67,51 @@ using namespace std;
 #define LISTEN_PORT "44444"
 int clnt_sock;
 
-//for debugging
+//for debugging and logging
+#define NORM_LOG_ENABLED 0
+#define TEST_LOG_ENABLED 1 
+
+typedef std::ostream& (*manip) (std::ostream&);
+struct normlogger
+{
+    template< typename T >
+    normlogger &operator<<(const T &val)
+    {
+        if(NORM_LOG_ENABLED)
+            std::cout<<val;
+        return *this;
+    }
+
+    normlogger &operator<<(manip manipulator)
+    {
+        if(NORM_LOG_ENABLED)
+            std::cout<<manipulator;
+        return *this;
+    }
+};
+
+struct testlogger
+{
+    template< typename T >
+    testlogger &operator<<(const T &val)
+    {
+        if(TEST_LOG_ENABLED)
+            std::cout<<val;
+        return *this;
+    }
+
+    testlogger &operator<<(manip manipulator)
+    {
+        if(TEST_LOG_ENABLED)
+            std::cout<<manipulator;
+        return *this;
+    }
+};
+
+
 #define NETWORK_DEBUG 0 
+static normlogger logout = normlogger(); 
+static testlogger testout = testlogger();
 
 //for developing
 #define NEW_VERSION 0
@@ -92,6 +138,7 @@ void error_handling(char * buf);
 void * network_handler(void * arg);
 void test_json();
 void *detection_handler(void *arg);
+int write_log(const char *foramat, ...);
 
 char command_buf[BUF_SIZE];
 
@@ -118,6 +165,7 @@ class Detector {
         int num_channels_;
         cv::Mat mean_;
 };
+
 
 Detector::Detector(const string& model_file,
         const string& weights_file,
@@ -367,11 +415,11 @@ int main(int argc, char** argv) {
         error_handling((char*)"listen() error");
     }
 
-    printf(" waiting connection ... \n");
+    logout << " waiting connection ... \n" << std::endl;
     memset(&clnt_adr, 0, sizeof(clnt_adr));
     memset(&clnt_adr_sz, 0, sizeof(clnt_adr_sz));
     clnt_sock = accept(serv_sock,(struct sockaddr *)&clnt_adr, &clnt_adr_sz);
-    printf(" connected \n");
+    logout <<" connected \n" << std::endl;
 
     //Network handler thread start!
 
@@ -403,13 +451,12 @@ void *detection_handler(void *arg)
     const string& out_file = FLAGS_out_file;
     const float confidence_threshold = FLAGS_confidence_threshold;
 
-    std::cout << model_file << std::endl << weights_file << std::endl;
-
     // Initialize the network.
 
     Detector detector(model_file, weights_file, mean_file, mean_value);
 
     // Set the output mode.
+    /* original log code - not used
     std::streambuf* buf = std::cout.rdbuf();
     std::ofstream outfile;
     if (!out_file.empty()) {
@@ -419,6 +466,7 @@ void *detection_handler(void *arg)
         }
     }
     std::ostream out(buf);
+    */
 
     // Process image one by one.
     std::string file;
@@ -435,13 +483,13 @@ void *detection_handler(void *arg)
             CHECK_EQ(d.size(), 7);
             const float score = d[2];
             if (score >= confidence_threshold) {
-                out << file << " ";
-                out << static_cast<int>(d[1]) << " ";
-                out << score << " ";
-                out << static_cast<int>(d[3] * img.cols) << " ";
-                out << static_cast<int>(d[4] * img.rows) << " ";
-                out << static_cast<int>(d[5] * img.cols) << " ";
-                out << static_cast<int>(d[6] * img.rows) << std::endl;
+                logout << file << " ";
+                logout << static_cast<int>(d[1]) << " ";
+                logout << score << " ";
+                logout << static_cast<int>(d[3] * img.cols) << " ";
+                logout << static_cast<int>(d[4] * img.rows) << " ";
+                logout << static_cast<int>(d[5] * img.cols) << " ";
+                logout << static_cast<int>(d[6] * img.rows) << std::endl;
             }
         }
     } else if (file_type == "video") {
@@ -483,7 +531,7 @@ void *detection_handler(void *arg)
 
                 if(!is_first_detect || is_detect_thisframe)
                 {
-                    std::cout << "img row: " << img.rows<< "img col " << img.cols << std::endl;
+                    logout << "image row: " << img.rows << " image col: " << img.cols << std::endl;
                     top_left_x = std::max(static_cast<int>(bbox.x - bbox.width* CROP_RATIO), 0); 
                     top_left_x = std::min(top_left_x, img.cols);
                     top_left_y = std::max(static_cast<int>(bbox.y - bbox.height* CROP_RATIO), 0); 
@@ -527,14 +575,14 @@ void *detection_handler(void *arg)
 
                     if (score >= confidence_threshold) {
 
-                        out << file << "_";
-                        out << std::setfill('0') << std::setw(6) << frame_count << " ";
-                        out << static_cast<int>(d[1]) << " ";
-                        out << score << " ";
-                        out << static_cast<int>(d[3] * sub_img.cols) << " ";
-                        out << static_cast<int>(d[4] * sub_img.rows) << " ";
-                        out << static_cast<int>(d[5] * sub_img.cols) << " ";
-                        out << static_cast<int>(d[6] * sub_img.rows) << std::endl;
+                        logout << file << "_";
+                        logout << std::setfill('0') << std::setw(6) << frame_count << " ";
+                        logout << static_cast<int>(d[1]) << " ";
+                        logout << score << " ";
+                        logout << static_cast<int>(d[3] * sub_img.cols) << " ";
+                        logout << static_cast<int>(d[4] * sub_img.rows) << " ";
+                        logout << static_cast<int>(d[5] * sub_img.cols) << " ";
+                        logout << static_cast<int>(d[6] * sub_img.rows) << std::endl;
                         /*          cv::line(sub_img, cv::Point(d[3]* sub_img.cols,d[4] * sub_img.rows), \
                                     cv::Point(d[5]*sub_img.cols,d[6]*sub_img.rows), cv::Scalar(255,255,0));
                                     */
@@ -559,7 +607,7 @@ void *detection_handler(void *arg)
                         if (d[1] == 15){
                             if(count_person == 1)
                             {
-                                printf("Multiple person: detection failed\n");
+                                logout << "Multiple person: detection failed\n" << std::endl;
                                 count_person++;
                                 break;
                             }
@@ -576,17 +624,14 @@ void *detection_handler(void *arg)
                                     cv::Point(d[5]*sub_img.cols + top_left_x, d[6]*sub_img.rows + top_left_y),
                                     cv::Scalar(255,0,0),2,8);
 
-                            printf("bbox.x + bbox.width/2 : %f crop (x_avg ) %d \n"
-                                    , bbox.x + bbox.width/2, (x_avg ));
-
+                            logout << "bbox.x + bbox.width/2: " << bbox.x + bbox.width/2 << "crop (x_avg ): " << x_avg << std::endl;
                             min_rect.x = d[3]*sub_img.cols + top_left_x;
                             min_rect.y = d[4]*sub_img.rows + top_left_y;
                             min_rect.height = my_height;
                             min_rect.width = my_width;
 
-                            printf("det_height %f det_width %f det_x %f det_y %f\n",
-                                    min_rect.height, min_rect.width, min_rect.x, min_rect.y);
-                            printf("min_distance : %f\n",min_distance);
+                            logout << "det_height: " << min_rect << std::endl;
+                            logout << "min_distance: " << min_distance << std::endl;
                             detect_success = true;
                             count_person++;
                         }
@@ -607,8 +652,7 @@ void *detection_handler(void *arg)
                             float cur_distance = sqrt((bbox.x + bbox.width/2 - (x_avg)) *(bbox.x + bbox.width/2 - (x_avg)) +
                                     (bbox.y + bbox.height/2 - (y_avg)) *(bbox.y + bbox.height/2 - (y_avg)));
 
-                            printf("bbox.x + bbox.width/2 : %f crop (x_avg ) %d \n"
-                                    , bbox.x + bbox.width/2, (x_avg ));
+                            logout << "bbox.x + bbox.width/2 : " << bbox.x + bbox.width/2 << "crop (x_avg ): " << x_avg << std::endl; 
 
                             if ( cur_distance < min_distance || min_distance == 0){
                                 min_distance = cur_distance;
@@ -623,15 +667,14 @@ void *detection_handler(void *arg)
                                bbox.x = d[3]*sub_img.cols + top_left_x;
                                bbox.y = d[4]*sub_img.rows + top_left_y;
                                */
-                            printf("det_height %f det_width %f det_x %f det_y %f\n",
-                                    min_rect.height, min_rect.width, min_rect.x, min_rect.y);
-                            printf("min_distance : %f\n",min_distance);
+                            logout << min_rect << std::endl;
+                            logout << "min_distance: " << min_distance << std::endl;
                             detect_success = true;
                             count_car++;
 #endif
                         }
                         /************************SHOULD BE UPDATED-END*************************/
-                        printf("count_car : %d\n", count_car);
+                        logout << "count_car: " << count_car << std::endl;
                     }
                 }
                 //TODO : if minimum distance is larger than bbox, tracker use old box.
@@ -704,8 +747,7 @@ void *detection_handler(void *arg)
                         continue;
                     }
 
-                    std::cout << "detection fail" << std::endl;
-                    std::cout << "min_distance: " << min_distance << "bbox.width: " << bbox.width << "bbox.height: " << bbox.height << std::endl;
+                    logout << "detection fail" << std::endl;
                 }
                 count_car = 0;
                 count_person = 0;
@@ -715,7 +757,7 @@ void *detection_handler(void *arg)
             else{
                 tracker -> update(img, bbox); 
                 rectangle(img, bbox, cv::Scalar(255,0,0),2,1);
-                printf("height %f width %f x %f y %f\n", bbox.height, bbox.width, bbox.x, bbox.y);
+                logout << bbox << std::endl;
 
                 Json::Value data_json;
                 data_json["status"] = "SUCCESS";
@@ -746,8 +788,6 @@ void *detection_handler(void *arg)
     } else {
         LOG(FATAL) << "Unknown file_type: " << file_type;
     }
-
-    std::cout << confidence_threshold << std::endl;
 }
 
 void *network_handler(void *arg)
@@ -766,7 +806,6 @@ void *network_handler(void *arg)
         read_len = read(clnt_sock,buf, BUF_SIZE);
         rcv = string(buf);
 
-        printf("input process\n");
         bool parsingRet = reader.parse(rcv, data);
         if (!parsingRet)
         {
@@ -841,12 +880,8 @@ void *network_handler(void *arg)
             continue;
         }
 
-
-        std::cout << cmd.asString() << std::endl;
-        std::cout << object_json.asString() << std::endl;
-        std::cout << index_json.asString() << std::endl;
+        testout << "cmd: " << cmd.asString() << std::endl;
     }
-
     return 0;
 }
 
@@ -884,7 +919,7 @@ void test_json()
 
     Json::StyledWriter writer;
     str = writer.write(root);
-    std::cout << str << std::endl << std::endl;
+    logout << "test_json: " << str << std::endl;
 }
 
 
@@ -894,3 +929,7 @@ int main(int argc, char** argv) {
     LOG(FATAL) << "This example requires OpenCV; compile with USE_OPENCV.";
 }
 #endif  // USE_OPENCV
+
+
+
+
