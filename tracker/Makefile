@@ -3,7 +3,8 @@ MYFLAGES+= -I../include \
 		  -I../build/include \
 		  -I/usr/local/cuda/include \
 		  -I/usr/include/hdf5/serial \
-		  -I./dist/ 
+		  -I./dist/ \
+		  -I../.build_release/lib
 LIBS = `pkg-config --libs opencv`
 MYLIBS+= -L../build/lib/ \
 		 -lcaffe -lboost_system -lboost_thread -lglog -lpthread \

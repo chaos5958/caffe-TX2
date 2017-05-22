@@ -11,13 +11,13 @@
 // list_file can also contain a list of video files with the format as follows:
 //    folder/video1.mp4
 //    folder/video2.mp4
-//
-//
 #include <caffe/caffe.hpp>
 #ifdef USE_OPENCV
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/opencv.hpp>
+#include <opencv2/cvconfig.h>
 #endif  // USE_OPENCV
 #include <algorithm>
 #include <iomanip>
@@ -68,6 +68,7 @@ using namespace std;
 int clnt_sock;
 
 //for debugging and logging
+#define USE_STREAM 1
 #define NORM_LOG_ENABLED 0
 #define TEST_LOG_ENABLED 1 
 
@@ -352,7 +353,7 @@ DEFINE_string(file_type, "video",
         "The file type in the list_file. Currently support image and video.");
 DEFINE_string(out_file, "",
         "If provided, store the detection results in the out_file.");
-DEFINE_double(confidence_threshold, 0.4,
+DEFINE_double(confidence_threshold, 0.1,
         "Only store detections with score higher than the threshold.");
 
 
@@ -413,6 +414,11 @@ int main(int argc, char** argv) {
     }
     if(listen(serv_sock, 5) == -1){
         error_handling((char*)"listen() error");
+    }
+    int enable = 1;
+
+    if (setsockopt(serv_sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0){
+    	error_handling("setsockopt(SO_REUSEADDR) failed");
     }
 
     logout << " waiting connection ... \n" << std::endl;
@@ -493,9 +499,19 @@ void *detection_handler(void *arg)
             }
         }
     } else if (file_type == "video") {
-        cv::VideoCapture cap(input_args->operator[](2));
-        //cv::VideoCapture cap(file);
-        cv::namedWindow("test",1);
+	//1. Recorded video
+	cv::VideoCapture cap;
+
+	if(!USE_STREAM)
+		cap = cv::VideoCapture((input_args->operator[](2)));
+	//2. Stream video
+	else{
+		cap = cv::VideoCapture(1);
+		cap.set(CV_CAP_PROP_FRAME_WIDTH, 1280);	
+		cap.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
+		cap.set(CV_CAP_PROP_FPS, 5);
+	}
+	cv::namedWindow("test",1);
 
         cv::Ptr<cv::Tracker> tracker = cv::Tracker::create(TRACKING_METHOD);
         cv::Rect2d bbox(600,150,100,100);
