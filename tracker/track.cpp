@@ -528,13 +528,14 @@ void *detection_handler(void *arg)
         while (true) {
             pthread_mutex_lock(&track_mutex);
             while(!is_detect_run)
-                pthread_cond_wait(&track_cond, &track_mutex);
-                
-            success = cap.read(img);
+                pthread_cond_wait(&track_cond, &track_mutex);  
+	    pthread_mutex_unlock(&track_mutex);
+            
+	    success = cap.read(img);
 
             if (!success) {
                 LOG(INFO) << "Process " << frame_count << " frames from " << file;
-                pthread_mutex_unlock(&track_mutex);
+            //    pthread_mutex_unlock(&track_mutex);
                 break;
             }
             CHECK(!img.empty()) << "Error when read frame";
@@ -707,7 +708,9 @@ void *detection_handler(void *arg)
                     //Multi-object error
                     if(count_person > 1)
                     {
+                        pthread_mutex_lock(&track_mutex);
                         is_detect_run = false; 
+                        pthread_mutex_unlock(&track_mutex);
 
                         data_json["status"] = "MULTI_OBJECTS";
                         Json::StyledWriter writer;
@@ -750,9 +753,11 @@ void *detection_handler(void *arg)
                 //Detection fail error
                 else
                 {
+                    pthread_mutex_lock(&track_mutex);
                     is_detect_run = false; 
-
-                    Json::Value data_json;
+                    pthread_mutex_unlock(&track_mutex);
+                    
+		    Json::Value data_json;
                     data_json["status"] = "NO_OBJECTS";
                     Json::StyledWriter writer;
                     std::string str = writer.write(data_json);
@@ -767,7 +772,9 @@ void *detection_handler(void *arg)
                 }
                 count_car = 0;
                 count_person = 0;
+                pthread_mutex_lock(&track_mutex);
                 is_detect_thisframe = false;
+                pthread_mutex_unlock(&track_mutex);
             }
             //Handle tracking 
             else{
@@ -795,7 +802,7 @@ void *detection_handler(void *arg)
             cv::waitKey(30);   
             ++frame_count;
 
-            pthread_mutex_unlock(&track_mutex);
+        //    pthread_mutex_unlock(&track_mutex);
         }
 
         if (cap.isOpened()) {
