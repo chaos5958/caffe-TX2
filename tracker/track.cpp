@@ -75,6 +75,10 @@ int clnt_sock;
 #define NORM_LOG_ENABLED 0
 #define TEST_LOG_ENABLED 1 
 
+//for real-time
+
+cv::Mat thread_read_img;
+
 typedef std::ostream& (*manip) (std::ostream&);
 struct normlogger
 {
@@ -143,6 +147,8 @@ void * network_handler(void * arg);
 void test_json();
 void *detection_handler(void *arg);
 int write_log(const char *foramat, ...);
+void * img_handler (void * arg);
+
 
 char command_buf[BUF_SIZE];
 
@@ -421,7 +427,7 @@ int main(int argc, char** argv) {
     int enable = 1;
 
     if (setsockopt(serv_sock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) < 0){
-    	error_handling("setsockopt(SO_REUSEADDR) failed");
+        error_handling("setsockopt(SO_REUSEADDR) failed");
     }
 
     logout << " waiting connection ... \n" << std::endl;
@@ -432,8 +438,14 @@ int main(int argc, char** argv) {
 
     //Network handler thread start!
 
-    pthread_t network_thread, detection_thread;
+    pthread_t network_thread, detection_thread, img_thread;
     pthread_create(&network_thread, NULL, network_handler, NULL);
+
+#if (USE_STREAM == 1)
+    testout<< "create img thread " << endl;
+    pthread_create(&img_thread, NULL, img_handler, NULL);
+    pthread_detach(img_thread);
+#endif
 
 #if (NETWORK_DEBUG != 1)
     pthread_create(&detection_thread, NULL, detection_handler, &input_args);
@@ -501,53 +513,73 @@ void *detection_handler(void *arg)
                 logout << static_cast<int>(d[6] * img.rows) << std::endl;
             }
         }
-    } else if (file_type == "video") {
-	//1. Recorded video
-	cv::VideoCapture cap;
-
-	if(!USE_STREAM)
-		cap = cv::VideoCapture((input_args->operator[](2)));
-	//2. Stream video
-	else{
-		cap = cv::VideoCapture(1);
-		cap.set(CV_CAP_PROP_FRAME_WIDTH, 1280);	
-		cap.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
-		cap.set(CV_CAP_PROP_FPS, 5);
-		cap.set(CV_CAP_PROP_BUFFERSIZE,1);
-	}
-	cv::namedWindow("test",1);
-
+    } 
+    else if (file_type == "video") {
         cv::Ptr<cv::Tracker> tracker = cv::Tracker::create(TRACKING_METHOD);
         cv::Rect2d bbox(600,150,100,100);
-	cv::Rect2d draw_bbox(600,150,100,100);
-	float reduce_x = 0;
-	float reduce_y = 0;
-	float reduce_width = 0;
-	float reduce_height = 0;
-        if (!cap.isOpened()) {
-            LOG(FATAL) << "Failed to open video: " << file;
-        }
+        cv::Rect2d draw_bbox(600,150,100,100);
+        float reduce_x = 0;
+        float reduce_y = 0;
+        float reduce_width = 0;
+        float reduce_height = 0;
+        int max_width = 200;
+        int max_height = 200;
+
         cv::Mat img, sub_img;
-        bool success = cap.read(img);
+        bool success = false;
         bool is_first_detect = true;
         bool detect_success = false;
-        tracker->init(img, bbox);
+
         int frame_count = 0, top_left_x = 0, top_left_y = 0, tmp_width = 0, tmp_height = 0;
+        cv::VideoCapture cap;
+
+
+        //1. Recorded video
+        if(!USE_STREAM){
+            cap = cv::VideoCapture((input_args->operator[](2)));
+
+            if (!cap.isOpened()) {
+                LOG(FATAL) << "Failed to open video: " << file;
+            }
+            success = cap.read(img);
+        }
+
+        //2. Stream video
+        else{
+            sleep(1);
+            img = thread_read_img;
+            //use img_handler thread
+            /*
+            cap = cv::VideoCapture(1);
+            cap.set(CV_CAP_PROP_FRAME_WIDTH, 1280); 
+            cap.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
+            cap.set(CV_CAP_PROP_FPS, 5);
+            cap.set(CV_CAP_PROP_BUFFERSIZE,1);
+            */
+        }
+        cv::namedWindow("test",1);
+
+        tracker->init(img, bbox);
         
         while (true) {
             pthread_mutex_lock(&track_mutex);
             while(!is_detect_run)
                 pthread_cond_wait(&track_cond, &track_mutex);  
-	    pthread_mutex_unlock(&track_mutex);
+            pthread_mutex_unlock(&track_mutex);
            
-	   clock_t before_read_img;
-	   double time_diff;
-	   before_read_img = clock();
-	    success = cap.read(img);
-            if (!success) {
-                LOG(INFO) << "Process " << frame_count << " frames from " << file;
-            //    pthread_mutex_unlock(&track_mutex);
-                break;
+            clock_t before_read_img;
+            double time_diff;
+            before_read_img = clock();
+            if(!USE_STREAM){
+                success = cap.read(img);
+                if (!success) {
+                    LOG(INFO) << "Process " << frame_count << " frames from " << file;
+                //    pthread_mutex_unlock(&track_mutex);
+                    break;
+                }
+            }
+            else{
+                img = thread_read_img;
             }
             CHECK(!img.empty()) << "Error when read frame";
 
@@ -576,35 +608,35 @@ void *detection_handler(void *arg)
 
                     if (top_left_x + tmp_width > img.cols)
                     {
-		    //YHH's code
+            //YHH's code
                         //tmp_width = (img.cols - top_left_x)/2;
                         tmp_width = (img.cols - top_left_x);
                     }
-		    //error handling
-		    else if(top_left_x <= 0){
-			top_left_x = 0;
-		    }
+            //error handling
+                    else if(top_left_x <= 0){
+                        top_left_x = 0;
+                    }
 
                     if (top_left_y + tmp_height > img.rows)
                     {
-		    //YHH's code
+                      //YHH's code
                         //tmp_height = (img.rows - top_left_y)/2;
                         tmp_height = (img.rows - top_left_y);
                     }
-		    else if(top_left_y <= 0){
-			top_left_y = 0;
-		    }
-			testout<< "before sub_img " << endl;
-			testout<< "x" << top_left_x <<" y"<< 
-			top_left_y << "tmp_width" << tmp_width << "tmp_height " << tmp_height << endl;
-                    sub_img = img(cv::Rect(top_left_x, top_left_y, tmp_width, tmp_height));  
-			testout<< "after  sub img " << endl;
+                    else if(top_left_y <= 0){
+                         top_left_y = 0;
+                    }
+                    testout<< "before sub_img " << endl;
+                    testout<< "x" << top_left_x <<" y"<< 
+                    top_left_y << "tmp_width" << tmp_width << "tmp_height " << tmp_height << endl;
+                            sub_img = img(cv::Rect(top_left_x, top_left_y, tmp_width, tmp_height));  
+                    testout<< "after  sub img " << endl;
 
                 }
                 else
                 {
-		    testout<< "first detect !!!!!!!!!!!!!!!!!"<<endl;
-        	    top_left_x = 280, top_left_y = 0, tmp_width = 0, tmp_height = 0;
+                  testout<< "first detect !!!!!!!!!!!!!!!!!"<<endl;
+                top_left_x = 280, top_left_y = 0, tmp_width = 0, tmp_height = 0;
                     sub_img = img(cv::Rect(280,0,720,720));
                     is_first_detect = false;
                 }
@@ -615,7 +647,7 @@ void *detection_handler(void *arg)
                 int x_avg, y_avg, count_car = 0, count_person = 0;
                 cv::Rect2d min_rect(0,0,1,1);
                 float min_distance = 0;
-		float max_score = 0;
+        float max_score = 0;
                 /* Print the detection results. */
                 for (int i = 0; i < detections.size(); ++i) {
                     const vector<float>& d = detections[i];
@@ -661,7 +693,7 @@ void *detection_handler(void *arg)
                                 count_person++;
                                 break;
                             }
-			    */
+                */
 
                             text = "person";
                             cv::Size textSize = cv::getTextSize(text, fontFace,
@@ -676,49 +708,48 @@ void *detection_handler(void *arg)
                                     cv::Scalar(255,0,0),2,8);
 
                             logout << "bbox.x + bbox.width/2: " << bbox.x + bbox.width/2 << "crop (x_avg ): " << x_avg << std::endl;
-			    //to track the hightest score object 
+                //to track the hightest score object 
                             if(score > max_score){
-				draw_bbox.x = d[3]*sub_img.cols + top_left_x;
-				draw_bbox.y = d[4]*sub_img.rows + top_left_y;
-				draw_bbox.height = my_height;
-				draw_bbox.width = my_width;
-			//if my_width or my_height is greater than 40, we resize it to 40 for fast tracking	i
-				int max_width = 200;
-				int max_height = 200;
-				if(my_width > max_width){
-				//	printf("exceed width !!!!!!!!!!!\n");
-				    reduce_width = my_width - max_width;
-				    reduce_x = (my_width - max_width)/2;
-				    min_rect.x = d[3]*sub_img.cols + top_left_x + reduce_x;
-				    min_rect.width = max_width;
-				}
-				else{
-				    reduce_width = 0;
-				    reduce_x = 0;
-				    min_rect.x = d[3]*sub_img.cols + top_left_x;
-				    min_rect.width = my_width;
-				}
-				if(my_height > max_height){
-				//printf("exceed height !!!!!!!!!!\n");
-				    reduce_height = my_height - max_height;
-				    reduce_y = (my_height - max_height)/2;
-				    min_rect.y = d[4]*sub_img.rows + top_left_y + reduce_y;
-				    min_rect.height = max_height;
-				}
-				else{
-				    reduce_height = 0;
-				    reduce_y = 0;
-				    min_rect.y = d[4]*sub_img.rows + top_left_y;
-				    min_rect.height = my_height;
-				}
-				/*
-				    min_rect.x = d[3]*sub_img.cols + top_left_x;
-				    min_rect.y = d[4]*sub_img.rows + top_left_y;
-				    min_rect.height = my_height;
-				    min_rect.width = my_width; */
-				max_score = score;
-			    }
-			   
+                draw_bbox.x = d[3]*sub_img.cols + top_left_x;
+                draw_bbox.y = d[4]*sub_img.rows + top_left_y;
+                draw_bbox.height = my_height;
+                draw_bbox.width = my_width;
+            //if my_width or my_height is greater than 40, we resize it to 40 for fast tracking i
+                
+                if(my_width > max_width){
+                //  printf("exceed width !!!!!!!!!!!\n");
+                    reduce_width = my_width - max_width;
+                    reduce_x = (my_width - max_width)/2;
+                    min_rect.x = d[3]*sub_img.cols + top_left_x + reduce_x;
+                    min_rect.width = max_width;
+                }
+                else{
+                    reduce_width = 0;
+                    reduce_x = 0;
+                    min_rect.x = d[3]*sub_img.cols + top_left_x;
+                    min_rect.width = my_width;
+                }
+                if(my_height > max_height){
+                //printf("exceed height !!!!!!!!!!\n");
+                    reduce_height = my_height - max_height;
+                    reduce_y = (my_height - max_height)/2;
+                    min_rect.y = d[4]*sub_img.rows + top_left_y + reduce_y;
+                    min_rect.height = max_height;
+                }
+                else{
+                    reduce_height = 0;
+                    reduce_y = 0;
+                    min_rect.y = d[4]*sub_img.rows + top_left_y;
+                    min_rect.height = my_height;
+                }
+                /*
+                    min_rect.x = d[3]*sub_img.cols + top_left_x;
+                    min_rect.y = d[4]*sub_img.rows + top_left_y;
+                    min_rect.height = my_height;
+                    min_rect.width = my_width; */
+                max_score = score;
+                }
+               
                             logout << "det_height: " << min_rect << std::endl;
                             testout << "det_height: " << min_rect << std::endl;
                             logout << "min_distance: " << min_distance << std::endl;
@@ -748,11 +779,11 @@ void *detection_handler(void *arg)
                             if ( cur_distance < min_distance || min_distance == 0){
                                 min_distance = cur_distance;
                                 
-				min_rect.x = d[3]*sub_img.cols + top_left_x;
+                                min_rect.x = d[3]*sub_img.cols + top_left_x;
                                 min_rect.y = d[4]*sub_img.rows + top_left_y;
                                 min_rect.height = my_height;
                                 min_rect.width = my_width;
-				
+                
                             } 
                             /*
                                bbox.height = my_height;
@@ -786,7 +817,7 @@ void *detection_handler(void *arg)
                     {
                         pthread_mutex_lock(&track_mutex);
                         is_detect_run = true;
-			is_detect_thisframe = true;
+                        is_detect_thisframe = true;
                         pthread_mutex_unlock(&track_mutex);
 
                         data_json["status"] = "MULTI_OBJECTS";
@@ -798,8 +829,8 @@ void *detection_handler(void *arg)
                             perror("tracker sends error");
                             continue;
                         }
-		//for debugging 	
-			bbox.height = min_rect.height;
+                          //for debugging   
+                        bbox.height = min_rect.height;
                         bbox.width = min_rect.width;
                         bbox.x = min_rect.x;
                         bbox.y = min_rect.y;
@@ -843,11 +874,11 @@ void *detection_handler(void *arg)
                 {
                     pthread_mutex_lock(&track_mutex);
                     is_detect_run = true;
-		    is_detect_thisframe = true;
-		    is_first_detect = true;
+            is_detect_thisframe = true;
+            is_first_detect = true;
                     pthread_mutex_unlock(&track_mutex);
                     
-		    Json::Value data_json;
+            Json::Value data_json;
                     data_json["status"] = "NO_OBJECTS";
                     Json::StyledWriter writer;
                     std::string str = writer.write(data_json);
@@ -860,19 +891,19 @@ void *detection_handler(void *arg)
 
                     logout << "detection fail" << std::endl;
                 }
-		if(count_person > 1){
-                	pthread_mutex_lock(&track_mutex);
-                	is_detect_thisframe = true;
-                	pthread_mutex_unlock(&track_mutex);
-		}
-		else{
-		    pthread_mutex_lock(&track_mutex);
+        if(count_person > 1){
+                    pthread_mutex_lock(&track_mutex);
+                    is_detect_thisframe = true;
+                    pthread_mutex_unlock(&track_mutex);
+        }
+        else{
+            pthread_mutex_lock(&track_mutex);
                     is_detect_thisframe = false;
                     pthread_mutex_unlock(&track_mutex);
-		}
-		count_car = 0;
+        }
+        count_car = 0;
                 count_person = 0;
-		max_score = 0;
+        max_score = 0;
                 
             }
             //Handle tracking 
@@ -880,24 +911,24 @@ void *detection_handler(void *arg)
                 tracker -> update(img, bbox); 
 
                 //update draw box information 
-		
-		draw_bbox.x = bbox.x - reduce_x;
-		
-		draw_bbox.y = bbox.y - reduce_y;
-		draw_bbox.width = bbox.width +reduce_width;
-		draw_bbox.height = bbox.height + reduce_height;
-		if(draw_bbox.x <=0){
-		    draw_bbox.x = 0;
-		}
-		if(draw_bbox.y <=0){
-		    draw_bbox.y = 0;
-		}
-		testout << "draw_bbox " << draw_bbox <<endl;	
-		
-		rectangle(img,draw_bbox, cv::Scalar(255,0,0),2,1);
-		rectangle(img, bbox, cv::Scalar(255,0,0),2,1);
+        
+        draw_bbox.x = bbox.x - reduce_x;
+        
+        draw_bbox.y = bbox.y - reduce_y;
+        draw_bbox.width = bbox.width +reduce_width;
+        draw_bbox.height = bbox.height + reduce_height;
+        if(draw_bbox.x <=0){
+            draw_bbox.x = 0;
+        }
+        if(draw_bbox.y <=0){
+            draw_bbox.y = 0;
+        }
+        testout << "draw_bbox " << draw_bbox <<endl;    
+        
+        rectangle(img,draw_bbox, cv::Scalar(255,0,0),2,1);
+        rectangle(img, bbox, cv::Scalar(255,0,0),2,1);
 
-		
+        
                 logout << bbox << std::endl;
 
                 Json::Value data_json;
@@ -916,21 +947,21 @@ void *detection_handler(void *arg)
                     continue;
                 }
             }
-	    time_diff = (double) (clock() -before_read_img) /CLOCKS_PER_SEC;
+        time_diff = (double) (clock() -before_read_img) /CLOCKS_PER_SEC;
 
-	    char frame_text[200];
+        char frame_text[200];
             int frame_fontFace = cv::FONT_HERSHEY_PLAIN;
             double frame_fontScale = 2;
-	    int frame_thickness = 2;
-	    int frame_baseline = 0;
-	    sprintf(frame_text,"%lf",(1/time_diff));
-	    testout << "frames : "<< frame_text << endl;
-	    cv::Size frame_textSize = cv::getTextSize(frame_text, frame_fontFace,
-		    frame_fontScale, frame_thickness, &frame_baseline);
-	    frame_baseline += frame_thickness;
-	    cv::Point frame_textOrg(100 - frame_textSize.width/2 ,100 - frame_textSize.height/2);
-	    putText(img, frame_text, frame_textOrg, frame_fontFace, frame_fontScale,
-		    cv::Scalar(128,128,128), frame_thickness, 8);
+        int frame_thickness = 2;
+        int frame_baseline = 0;
+        sprintf(frame_text,"%lf",(1/time_diff));
+        testout << "frames : "<< frame_text << endl;
+        cv::Size frame_textSize = cv::getTextSize(frame_text, frame_fontFace,
+            frame_fontScale, frame_thickness, &frame_baseline);
+        frame_baseline += frame_thickness;
+        cv::Point frame_textOrg(100 - frame_textSize.width/2 ,100 - frame_textSize.height/2);
+        putText(img, frame_text, frame_textOrg, frame_fontFace, frame_fontScale,
+            cv::Scalar(128,128,128), frame_thickness, 8);
             cv::imshow("test",img);
             cv::waitKey(30);   
             ++frame_count;
@@ -941,7 +972,8 @@ void *detection_handler(void *arg)
         if (cap.isOpened()) {
             cap.release();
         }
-    } else {
+    } 
+    else {
         LOG(FATAL) << "Unknown file_type: " << file_type;
     }
 }
@@ -1044,6 +1076,33 @@ void *network_handler(void *arg)
     }
     return 0;
 }
+
+void * img_handler(void * arg){
+
+    cv::VideoCapture cap(0);    
+    //cap = cv::VideoCapture(1);
+    cap.set(CV_CAP_PROP_FRAME_WIDTH, 1280); 
+    cap.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
+    cap.set(CV_CAP_PROP_FPS, 30);
+    //cap.set(CV_CAP_PROP_BUFFERSIZE,1);
+
+    cv::namedWindow("test",1);
+    if (!cap.isOpened()) {
+        //LOG(FATAL) << "Failed to open video: " << file;
+    }
+    
+    bool success  =false;  
+    while(true){
+        success = cap.read(thread_read_img);
+        if(!success){
+            std::cout << "fail" << std::endl;
+        }
+    }
+    if (cap.isOpened()) {
+        cap.release();
+    }
+}
+
 
 void error_handling(char * buf){
     fputs(buf, stderr);
