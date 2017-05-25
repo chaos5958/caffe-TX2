@@ -132,6 +132,7 @@ bool is_detect_run = false;
 bool is_detect_thisframe = false;
 int index_obj = 0;
 int object = 0; //NOT USED YET VER.1.0
+double send_track_period = 0.5;
 #define CAR 0
 #define HUMAN 1
 
@@ -512,7 +513,7 @@ void *detection_handler(void *arg)
 		cap = cv::VideoCapture(1);
 		cap.set(CV_CAP_PROP_FRAME_WIDTH, 1280);	
 		cap.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
-		cap.set(CV_CAP_PROP_FPS, 5);
+		cap.set(CV_CAP_PROP_FPS, 10);
 		cap.set(CV_CAP_PROP_BUFFERSIZE,1);
 	}
 	cv::namedWindow("test",1);
@@ -531,8 +532,11 @@ void *detection_handler(void *arg)
         bool success = cap.read(img);
         bool is_first_detect = true;
         bool detect_success = false;
+	bool send_track_result= true;
         tracker->init(img, bbox);
         int frame_count = 0, top_left_x = 0, top_left_y = 0, tmp_width = 0, tmp_height = 0;
+
+	clock_t send_track_timer;
         
         while (true) {
             pthread_mutex_lock(&track_mutex);
@@ -900,21 +904,35 @@ void *detection_handler(void *arg)
 		
                 logout << bbox << std::endl;
 
-                Json::Value data_json;
-                data_json["status"] = "SUCCESS";
-                data_json["data"]["x_min"] = bbox.x;
-                data_json["data"]["y_min"] = bbox.y;
-                data_json["data"]["width"] = bbox.width;
-                data_json["data"]["height"] = bbox.height;
+		if(send_track_result)
+		{
+			send_track_result = false;
+			send_track_timer = clock();
+		}
+		else
+		{
+			double time_elapsed = (clock() - send_track_timer) / CLOCKS_PER_SEC;
+			if(time_elapsed >= send_track_period)
+			{
+				Json::Value data_json;
+				data_json["status"] = "SUCCESS";
+				data_json["data"]["x_min"] = bbox.x;
+				data_json["data"]["y_min"] = bbox.y;
+				data_json["data"]["width"] = bbox.width;
+				data_json["data"]["height"] = bbox.height;
+				data_json["data"]["time"] = time_elapsed; 
 
-                Json::StyledWriter writer;
-                std::string str = writer.write(data_json);
+				Json::StyledWriter writer;
+				std::string str = writer.write(data_json);
 
-                if(send(clnt_sock, str.data(), str.size(), 0) < 0)
-                {
-                    perror("tracker sends error");
-                    continue;
-                }
+				if(send(clnt_sock, str.data(), str.size(), 0) < 0)
+				{
+					perror("tracker sends error");
+					continue;
+				}
+			}
+		}
+
             }
 	    time_diff = (double) (clock() -before_read_img) /CLOCKS_PER_SEC;
 
