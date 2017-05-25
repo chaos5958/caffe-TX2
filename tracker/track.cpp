@@ -72,6 +72,7 @@ int clnt_sock;
 
 //for debugging and logging
 #define USE_STREAM 1
+#define GCS_STREAM 1
 #define NORM_LOG_ENABLED 0
 #define TEST_LOG_ENABLED 1 
 
@@ -130,6 +131,7 @@ pthread_mutex_t track_mutex = PTHREAD_MUTEX_INITIALIZER;
 //Variables shared between threads
 bool is_detect_run = false;
 bool is_detect_thisframe = false;
+bool is_stream = false;
 int index_obj = 0;
 int object = 0; //NOT USED YET VER.1.0
 double send_track_period = 0.5;
@@ -505,6 +507,19 @@ void *detection_handler(void *arg)
     } else if (file_type == "video") {
 	//1. Recorded video
 	cv::VideoCapture cap;
+    cv::VideoWriter writer;
+
+    
+    if(GCS_STREAM)
+    {
+        writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=223.171.33.71 port=5000", 0, (double)30, cv::Size(640, 480), true); 
+
+        if (!writer.isOpened()) {
+            printf("=ERR= can't create video writer\n");
+            return NULL;
+        }
+    }
+
 
 	if(!USE_STREAM)
 		cap = cv::VideoCapture((input_args->operator[](2)));
@@ -932,7 +947,6 @@ void *detection_handler(void *arg)
 				}
 			}
 		}
-
             }
 	    time_diff = (double) (clock() -before_read_img) /CLOCKS_PER_SEC;
 
@@ -953,6 +967,13 @@ void *detection_handler(void *arg)
             cv::waitKey(30);   
             ++frame_count;
 
+            //Stream boxed image (result of tracking or detectiion
+            if(is_stream && GCS_STREAM)
+            {
+                cv::Mat img_str;
+                cv::resize(img,img_str,cv::Size(640,480));
+                writer << img_str;
+            }
         //    pthread_mutex_unlock(&track_mutex);
         }
 
@@ -992,7 +1013,8 @@ void *network_handler(void *arg)
         }
 
         //Parse json data
-        Json::Value cmd = data["cmd"];
+        Json::Value cmd = data["cmd"]["type"];
+        Json::Value action_json = data["cmd"]["action"];
         Json::Value object_json = data["target"]["object"];
         Json::Value index_json = data["target"]["index"];
 
@@ -1005,35 +1027,86 @@ void *network_handler(void *arg)
         //Handle each command from Drone Net
         if(cmd.asString().compare("track") == 0)
         {
-            if(object_json.isNull() || index_json.isNull())
+            testout << "track comes" << std::endl;
+            std::string tmp_str;
+            if(action_json.isNull())
             {
-                std::cerr << "[Track] Json format is wrong :" << buf << std::endl;
+                std::cerr << "[Track] Json format is wrong (none actino field) :" << buf << std::endl;
             }
 
-            //Get the object value from json
-            std::string tmp_str = object_json.asString();
-            if(tmp_str.compare("car"))
+            tmp_str = action_json.asString();
+            
+            if(tmp_str.compare("start") == 0)
             {
-                object = CAR;
+                testout << "track start comes" << std::endl;
+                if(object_json.isNull() || index_json.isNull())
+                {
+                    std::cerr << "[Track] Json format is wrong :" << buf << std::endl;
+                }
+
+                //Get the object value from json
+                tmp_str = object_json.asString();
+                if(tmp_str.compare("car"))
+                {
+                    object = CAR;
+                }
+                else if(tmp_str.compare("human"))
+                {
+                    object =  HUMAN; 
+                }
+                else
+                {
+                    std::cerr << "Object is invalid: " << buf << std::endl;
+                    continue;
+                }
+
+                //Get the index value from json 
+                index_obj = atoi(index_json.asString().c_str());
+
+                pthread_mutex_lock(&track_mutex);
+                is_detect_run = true;
+                is_detect_thisframe = true; 
+                pthread_cond_signal(&track_cond);
+                pthread_mutex_unlock(&track_mutex);
             }
-            else if(tmp_str.compare("human"))
+            else if(tmp_str.compare("stop") == 0)
             {
-                object =  HUMAN; 
+                pthread_mutex_lock(&track_mutex);
+                is_detect_run = false;
+                pthread_mutex_unlock(&track_mutex);
             }
             else
             {
-                std::cerr << "Object is invalid: " << buf << std::endl;
+                std::cerr << "[Track] Action is invalid: " << buf << std::endl;
                 continue;
             }
+        }
+        else if(cmd.asString().compare("stream") == 0)
+        {
+            std::string tmp_str;
+            if(action_json.isNull())
+            {
+                std::cerr << "[Stream] Json format is wrong (none actino field) :" << buf << std::endl;
+            }
 
-            //Get the index value from json 
-            index_obj = atoi(index_json.asString().c_str());
-
-            pthread_mutex_lock(&track_mutex);
-            is_detect_run = true;
-            is_detect_thisframe = true; 
-            pthread_cond_signal(&track_cond);
-            pthread_mutex_unlock(&track_mutex);
+            tmp_str = action_json.asString();
+            if(tmp_str.compare("start") == 0)
+            {
+                pthread_mutex_lock(&track_mutex);
+                is_stream = true;
+                pthread_mutex_unlock(&track_mutex);
+            }
+            else if(tmp_str.compare("stop") == 0)
+            {
+                pthread_mutex_lock(&track_mutex);
+                is_stream = false;
+                pthread_mutex_unlock(&track_mutex);
+            }
+            else
+            {
+                std::cerr << "[Stream] Action is invalid: " << buf << std::endl;
+                continue;
+            }
         }
         //Detect on a whole image
         else if(cmd.asString().compare("redetect") == 0)
@@ -1042,13 +1115,6 @@ void *network_handler(void *arg)
             is_detect_run = true;
             is_detect_thisframe = true; 
             pthread_cond_signal(&track_cond);
-            pthread_mutex_unlock(&track_mutex);
-
-        }
-        else if(cmd.asString().compare("stop") == 0)
-        {
-            pthread_mutex_lock(&track_mutex);
-            is_detect_run = false;
             pthread_mutex_unlock(&track_mutex);
 
         }
