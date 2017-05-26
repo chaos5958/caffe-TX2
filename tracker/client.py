@@ -58,7 +58,8 @@ def parse_json(data):
         y_min  = input['data']['y_min']
         width  = input['data']['width']
         height = input['data']['height']
-        print x_min, y_min, width, height
+        time = input['data']['time']
+        print "x_min: %d y_min: %d width: %d height: %d time: %f" % (x_min,  y_min, width, height, time)
 
 
 conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -75,42 +76,86 @@ try:
         command_state = 0
         while 1:
             keyboard_input = raw_input()
-            if keyboard_input.startswith('track'):
+            if keyboard_input.startswith('trackstart'):
                 command_state = 1
                 break
-            elif keyboard_input.startswith('redetect'):
+            elif keyboard_input.startswith('trackstop'):
                 command_state = 2
                 break
-            elif keyboard_input.startswith('stop'):
+            elif keyboard_input.startswith('streamstart'):
                 command_state = 3
+                break
+	    elif keyboard_input.startswith('steamstop'):
+                command_state = 4
+                break
+            elif keyboard_input.startswith('redetect'):
+                command_state = 5
+                break
+            elif keyboard_input.startswith('exit'):
+                command_state = 6
                 break
             else:
                 print "rewrite command"
         #track
         if(command_state == 1):
             msg = {
-                    'cmd': 'track',
+                    'cmd': {
+                        'type' : 'track',
+                        'action' : 'start',
+                        },
+
                     'target' : {
                         'object': 'car',
                         'index': 0,
                         }
                   }
-        #redetect
         elif(command_state == 2):
             msg = {
-                    'cmd': 'redetect'
-                    }
+                    'cmd': {
+                        'type' : 'track',
+                        'action' : 'stop',
+                        },
 
-        #stop
+                    'target' : {
+                        'object': 'car',
+                        'index': 0,
+                        }
+                  }
         elif(command_state == 3):
             msg = {
-                    'cmd': 'stop'
-                    }
+                    'cmd': {
+                        'type' : 'stream',
+                        'action' : 'start',
+                        }
+                  }
+        elif(command_state == 4):
+            msg = {
+                    'cmd': {
+                        'type' : 'stream',
+                        'action' : 'stop',
+                        }
+                  }
+        elif(command_state == 5):
+            msg = {
+                    'cmd': {
+                        'type' : 'redetect',
+                        }
+                  }
+        elif(command_state == 6):
+            msg = {
+                    'cmd': {
+                        'type' : 'exit',
+                        }
+                  }
+
 
         output = json.dumps(msg)
         print "Send ",
         print output
         conn.send(output)
+
+        if(command_state ==6):
+            break
     conn.close()
 except:
     print "End connection"
