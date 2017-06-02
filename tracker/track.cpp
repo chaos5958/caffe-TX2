@@ -71,7 +71,7 @@ using namespace std;
 int clnt_sock;
 
 //for debugging and logging
-#define USE_STREAM 0
+#define USE_STREAM 1
 #define GCS_STREAM 0 
 #define NORM_LOG_ENABLED 0
 #define TEST_LOG_ENABLED 1 
@@ -824,7 +824,7 @@ void *detection_handler(void *arg)
                         is_detect_thisframe = true;
                         pthread_mutex_unlock(&track_mutex);
 
-                        data_json["status"] = "MULTI_OBJECTS";
+                        data_json["data"]["status"] = "MULTI_OBJECTS";
                         data_json["type"] = "imageresult";
                         Json::StyledWriter writer;
                         std::string str = writer.write(data_json);
@@ -884,7 +884,7 @@ void *detection_handler(void *arg)
                     pthread_mutex_unlock(&track_mutex);
 
                     Json::Value data_json;
-                    data_json["status"] = "NO_OBJECTS";
+                    data_json["data"]["status"] = "NO_OBJECTS";
                     data_json["type"] = "imageresult";
                     Json::StyledWriter writer;
                     std::string str = writer.write(data_json);
@@ -948,8 +948,8 @@ void *detection_handler(void *arg)
                     if(time_elapsed >= send_track_period)
                     {
                         Json::Value data_json;
-                        data_json["status"] = "SUCCESS";
                         data_json["type"] = "imageresult";
+                        data_json["data"]["status"] = "SUCCESS";
                         data_json["data"]["x_min"] = bbox.x;
                         data_json["data"]["y_min"] = bbox.y;
                         data_json["data"]["width"] = bbox.width;
