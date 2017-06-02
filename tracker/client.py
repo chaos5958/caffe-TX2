@@ -12,11 +12,18 @@ import json
 HOST_IP = '127.0.0.1'
 HOST_PORT = 44444
 FLAG = True
+IS_DEBUG = False
 
 def recv_msg():
-    while True:
+
+    while 1:
         raw_data = conn.recv(4096)
-        #print repr(raw_data)
+        print repr(raw_data)
+
+
+    while IS_DEBUG:
+        raw_data = conn.recv(4096)
+        print repr(raw_data)
         json_list = []
         json_list = raw_data.split("}\n{");
         for i in range(len(json_list)):
@@ -94,60 +101,85 @@ try:
             elif keyboard_input.startswith('exit'):
                 command_state = 6
                 break
+            elif keyboard_input.startswith('config'):
+                command_state = 7 #TODO: parse key
+                break
+            elif keyboard_input.startswith('state'):
+                command_state = 8
+                break
             else:
                 print "rewrite command"
         #track
         if(command_state == 1):
             msg = {
-                    'cmd': {
-                        'type' : 'track',
-                        'action' : 'start',
-                        },
-
-                    'target' : {
-                        'object': 'car',
-                        'index': 0,
+                    "type": "image",
+                    "data":{
+                        "command": "track",
+                        "action": "start",
+                        "object": "car",
+                        "index": "0"
                         }
-                  }
+                    }
+
         elif(command_state == 2):
             msg = {
-                    'cmd': {
-                        'type' : 'track',
-                        'action' : 'stop',
-                        },
-
-                    'target' : {
-                        'object': 'car',
-                        'index': 0,
+                    "type": "image",
+                    "data":{
+                        "command": "track",
+                        "action": "stop"
                         }
-                  }
+                    }
+
         elif(command_state == 3):
             msg = {
-                    'cmd': {
-                        'type' : 'stream',
-                        'action' : 'start',
+                    "type": "image",
+                    "data":{
+                        "command": "stream",
+                        "action": "start"
                         }
-                  }
+                    }
+
+
         elif(command_state == 4):
             msg = {
-                    'cmd': {
-                        'type' : 'stream',
-                        'action' : 'stop',
+                    "type": "image",
+                    "data":{
+                        "command": "stream",
+                        "action": "stop"
                         }
-                  }
+                    }
+
         elif(command_state == 5):
             msg = {
-                    'cmd': {
-                        'type' : 'redetect',
+                    "type": "image",
+                    "data":{
+                        "command" : "redetect"
                         }
-                  }
+                    }
+
         elif(command_state == 6):
             msg = {
-                    'cmd': {
-                        'type' : 'exit',
+                    "type": "image",
+                    "data":{
+                        "command" : "exit"
                         }
-                  }
+                    }
+        elif(command_state == 7):
+            msg = {
+                    "type": "image",
+                    "data":{
+                        "command" : "config",
+                        "interval": "0.5" #default 0
+                        }
+                    }
 
+        elif(command_state == 8):
+            msg = {
+                    "type": "image",
+                    "data":{
+                        "command" : "state"
+                        }
+                    }
 
         output = json.dumps(msg)
         print "Send ",

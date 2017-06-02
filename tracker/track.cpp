@@ -71,7 +71,7 @@ using namespace std;
 int clnt_sock;
 
 //for debugging and logging
-#define USE_STREAM 1
+#define USE_STREAM 0
 #define GCS_STREAM 0 
 #define NORM_LOG_ENABLED 0
 #define TEST_LOG_ENABLED 1 
@@ -135,7 +135,9 @@ bool is_stream = false;
 bool is_quit = false;
 int index_obj = 0;
 int object = 0; //NOT USED YET VER.1.0
-double send_track_period = 0.5;
+double send_track_period = 0;
+int frame_width = 1280;
+int frame_height = 720;
 #define CAR 0
 #define HUMAN 1
 
@@ -531,8 +533,8 @@ void *detection_handler(void *arg)
 	//2. Stream video
 	else{
 		cap = cv::VideoCapture(1);
-		cap.set(CV_CAP_PROP_FRAME_WIDTH, 1280);	
-		cap.set(CV_CAP_PROP_FRAME_HEIGHT, 720);
+		cap.set(CV_CAP_PROP_FRAME_WIDTH, frame_width);	
+		cap.set(CV_CAP_PROP_FRAME_HEIGHT, frame_height);
 		cap.set(CV_CAP_PROP_FPS, 10);
 		cap.set(CV_CAP_PROP_BUFFERSIZE,1);
 	}
@@ -950,6 +952,8 @@ void *detection_handler(void *arg)
                         data_json["data"]["width"] = bbox.width;
                         data_json["data"]["height"] = bbox.height;
                         data_json["data"]["time"] = time_elapsed; 
+                        data_json["data"]["width"] = frame_width;
+                        data_json["data"]["height"] = frame_height;
 
                         Json::StyledWriter writer;
                         std::string str = writer.write(data_json);
@@ -1029,12 +1033,14 @@ void *network_handler(void *arg)
         }
 
         //Parse json data
-        Json::Value cmd = data["cmd"]["type"];
-        Json::Value action_json = data["cmd"]["action"];
+        Json::Value type= data["type"];
+        Json::Value cmd = data["data"]["command"];
+
         Json::Value object_json = data["target"]["object"];
         Json::Value index_json = data["target"]["index"];
 
-        if(cmd.isNull())
+
+        if(cmd.isNull() || type.isNull())
         {
             std::cerr << "Json format is wrong :" << buf << std::endl;
             continue;
@@ -1043,6 +1049,10 @@ void *network_handler(void *arg)
         //Handle each command from Drone Net
         if(cmd.asString().compare("track") == 0)
         {
+            Json::Value action_json = data["data"]["action"];
+            Json::Value object_json = data["data"]["object"];
+            Json::Value index_json = data["data"]["index"];
+
             testout << "track comes" << std::endl;
             std::string tmp_str;
             if(action_json.isNull())
@@ -1099,6 +1109,8 @@ void *network_handler(void *arg)
         }
         else if(cmd.asString().compare("stream") == 0)
         {
+            Json::Value action_json = data["data"]["action"];
+
             std::string tmp_str;
             if(action_json.isNull())
             {
@@ -1144,12 +1156,46 @@ void *network_handler(void *arg)
             pthread_exit(NULL);
 
         }
+        else if(cmd.asString().compare("state") == 0)
+        {
+            Json::Value data_json;
+
+            data_json["type"] = "return";
+            
+            if(is_detect_run)
+                data_json["data"]["track"] = "on";
+            else
+                data_json["data"]["track"] = "off";
+
+            if(is_stream)
+                data_json["data"]["stream"] = "on";
+            else
+                data_json["data"]["stream"] = "off";
+
+            Json::StyledWriter writer;
+            std::string str = writer.write(data_json);
+
+            if(send(clnt_sock, str.data(), str.size(), 0) < 0)
+            {
+                perror("tracker sends error");
+                continue;
+            }
+        }
+        else if(cmd.asString().compare("config") == 0)
+        {
+            Json::Value interval_json= data["data"]["interval"];
+            int input_period = atoi(interval_json.asString().c_str());
+            pthread_mutex_lock(&track_mutex);
+            send_track_period = input_period;
+            pthread_mutex_unlock(&track_mutex);
+            testout << "track_preriod: " << input_period << std::endl;
+
+        }
         else
         {
             std::cerr << "Command is invalid" << std::endl;
             continue;
-        }
-
+        } 
         testout << "cmd: " << cmd.asString() << std::endl;
     }
     return NULL;
