@@ -586,8 +586,8 @@ void *detection_handler(void *arg)
             }
             CHECK(!img.empty()) << "Error when read frame";
 
-            // detect objects per 10 frames
-            if (frame_count % 10 == 0 || is_detect_thisframe){
+            // detect objects 30 frames
+            if (frame_count % 30 == 0 || is_detect_thisframe){
                 //Crop image using prior tracking result
 
                 detect_success = false;
@@ -825,6 +825,7 @@ void *detection_handler(void *arg)
                         pthread_mutex_unlock(&track_mutex);
 
                         data_json["status"] = "MULTI_OBJECTS";
+                        data_json["type"] = "imageresult";
                         Json::StyledWriter writer;
                         std::string str = writer.write(data_json);
 
@@ -884,6 +885,7 @@ void *detection_handler(void *arg)
 
                     Json::Value data_json;
                     data_json["status"] = "NO_OBJECTS";
+                    data_json["type"] = "imageresult";
                     Json::StyledWriter writer;
                     std::string str = writer.write(data_json);
 
@@ -947,13 +949,14 @@ void *detection_handler(void *arg)
                     {
                         Json::Value data_json;
                         data_json["status"] = "SUCCESS";
+                        data_json["type"] = "imageresult";
                         data_json["data"]["x_min"] = bbox.x;
                         data_json["data"]["y_min"] = bbox.y;
                         data_json["data"]["width"] = bbox.width;
                         data_json["data"]["height"] = bbox.height;
                         data_json["data"]["time"] = time_elapsed; 
-                        data_json["data"]["width"] = frame_width;
-                        data_json["data"]["height"] = frame_height;
+                        data_json["data"]["v_width"] = frame_width;
+                        data_json["data"]["v_height"] = frame_height;
 
                         Json::StyledWriter writer;
                         std::string str = writer.write(data_json);
