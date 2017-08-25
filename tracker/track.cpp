@@ -72,7 +72,7 @@ int clnt_sock;
 
 //for debugging and logging
 #define USE_STREAM 1
-#define GCS_STREAM 0 
+#define GCS_STREAM 1 
 #define NORM_LOG_ENABLED 0
 #define TEST_LOG_ENABLED 1 
 
@@ -519,7 +519,8 @@ void *detection_handler(void *arg)
     
     if(GCS_STREAM)
     {
-        writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=223.171.33.71 port=5000", 0, (double)30, cv::Size(640, 480), true); 
+       // writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=223.171.33.71 port=5000", 0, (double)30, cv::Size(640, 480), true); 
+       writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=143.248.53.74 port=5000", 0, (double)30, cv::Size(640, 480), true); 
 
         if (!writer.isOpened()) {
             printf("=ERR= can't create video writer\n");
@@ -540,7 +541,8 @@ void *detection_handler(void *arg)
 	}
 	cv::namedWindow("test",1);
 
-        cv::Ptr<cv::Tracker> tracker = cv::Tracker::create(TRACKING_METHOD);
+        //cv::Ptr<cv::Tracker> tracker = cv::Tracker::create(TRACKING_METHOD);
+        cv::Ptr<cv::TrackerKCF> tracker = cv::TrackerKCF::create();
         cv::Rect2d bbox(600,150,100,100);
 	cv::Rect2d draw_bbox(600,150,100,100);
 	float reduce_x = 0;
@@ -841,7 +843,7 @@ void *detection_handler(void *arg)
                         bbox.y = min_rect.y;
 
                         tracker->clear();
-                        tracker = cv::Tracker::create(TRACKING_METHOD);
+                        tracker = cv::TrackerKCF::create();
                         tracker->init(img,bbox);
 
                     }
@@ -853,7 +855,7 @@ void *detection_handler(void *arg)
                         bbox.x = min_rect.x;
                         bbox.y = min_rect.y;
                         tracker->clear();
-                        tracker = cv::Tracker::create(TRACKING_METHOD);
+                        tracker = cv::TrackerKCF::create();
                         tracker->init(img,bbox);
 
 
