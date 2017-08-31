@@ -71,10 +71,13 @@ using namespace std;
 int clnt_sock;
 
 //for debugging and logging
-#define USE_STREAM 1
+#define USE_STREAM 0
 #define GCS_STREAM 1 
 #define NORM_LOG_ENABLED 0
 #define TEST_LOG_ENABLED 1 
+
+#define TRACKER_NAME 0 // 0 is create ("KCF")
+                       // 1 is KCFcreate()
 
 typedef std::ostream& (*manip) (std::ostream&);
 struct normlogger
@@ -541,9 +544,13 @@ void *detection_handler(void *arg)
 	}
 	cv::namedWindow("test",1);
 
-        //cv::Ptr<cv::Tracker> tracker = cv::Tracker::create(TRACKING_METHOD);
-        cv::Ptr<cv::TrackerKCF> tracker = cv::TrackerKCF::create();
-        cv::Rect2d bbox(600,150,100,100);
+#if KCF_NAME    
+    cv::Ptr<cv::TrackerKCF> tracker = cv::TrackerKCF::create();   
+#else
+    cv::Ptr<cv::Tracker> tracker = cv::Tracker::create(TRACKING_METHOD);
+#endif
+
+    cv::Rect2d bbox(600,150,100,100);
 	cv::Rect2d draw_bbox(600,150,100,100);
 	float reduce_x = 0;
 	float reduce_y = 0;
@@ -604,12 +611,27 @@ void *detection_handler(void *arg)
                     //tmp_width = (bbox.x - top_left_x) * 2 + bbox.width;
                     //tmp_height = (bbox.y - top_left_y) * 2 + bbox.height;
                     top_left_x = std::max(static_cast<int>(draw_bbox.x - draw_bbox.width* CROP_RATIO), 0); 
-                    top_left_x = std::min(top_left_x, img.cols);
+                    //top_left_x = std::min(top_left_x, img.cols);
                     top_left_y = std::max(static_cast<int>(draw_bbox.y - draw_bbox.height* CROP_RATIO), 0); 
-                    top_left_y = std::min(top_left_y, img.rows);
+                    //top_left_y = std::min(top_left_y, img.rows);
 
                     tmp_width = (draw_bbox.x - top_left_x) * 2 + draw_bbox.width;
                     tmp_height = (draw_bbox.y - top_left_y) * 2 + draw_bbox.height;
+
+                    //minimum cropped image size is caffe input size
+                    //
+                    int min_crop_x = 980;//1280-300;
+                    int min_crop_y = 420;//720-300;
+                    
+                    if(top_left_x >= min_crop_x ){
+                        top_left_x = min_crop_x;
+                        tmp_width = 300;
+                    }
+
+                    if(top_left_y >= min_crop_y){
+                        top_left_y = min_crop_y;
+                        tmp_width = 300;
+                    }
 
                     if (top_left_x + tmp_width > img.cols)
                     {
@@ -632,9 +654,11 @@ void *detection_handler(void *arg)
                         top_left_y = 0;
                     }
                     testout<< "before sub_img " << endl;
+                    printf("\x1b[31m");
                     testout<< "x" << top_left_x <<" y"<< 
                         top_left_y << "tmp_width" << tmp_width << "tmp_height " << tmp_height << endl;
                     sub_img = img(cv::Rect(top_left_x, top_left_y, tmp_width, tmp_height));  
+                    printf("\x1b[0m\n");
                     testout<< "after  sub img " << endl;
 
                 }
@@ -646,8 +670,11 @@ void *detection_handler(void *arg)
                     is_first_detect = false;
                 }
 
+                printf("debug 1\n");
                 std::vector<vector<float> > detections = detector.Detect(sub_img);
 
+                
+                printf("debug 2\n");
                 int my_width, my_height;
                 int x_avg, y_avg, count_car = 0, count_person = 0;
                 cv::Rect2d min_rect(0,0,1,1);
@@ -690,7 +717,8 @@ void *detection_handler(void *arg)
                         // 1) Box object should be saved in an array 
                         // 2) Multi-object tracking should be implemented
 
-                        //Person
+                        //Person = 15
+                        //Car = 7
                         if (d[1] == 15){
                             /*if(count_person == 1)
                               {
@@ -699,8 +727,16 @@ void *detection_handler(void *arg)
                               break;
                               }
                               */
+                            if( d[1] == 7){
+                                text = "car";
+                            }
+                            else if(d[1] == 15){
+                                text = "person";
+                            }
+                            else{
+                                text = "object";
+                            }
 
-                            text = "person";
                             cv::Size textSize = cv::getTextSize(text, fontFace,
                                     fontScale, thickness, &baseline);
                             baseline += thickness;
@@ -821,6 +857,7 @@ void *detection_handler(void *arg)
                     //Multi-object error
                     if(count_person > 1)
                     {
+                        printf("\x1b[42m MULTI OBJECTS \x1b[0m\n");
                         pthread_mutex_lock(&track_mutex);
                         is_detect_run = true;
                         is_detect_thisframe = true;
@@ -843,19 +880,32 @@ void *detection_handler(void *arg)
                         bbox.y = min_rect.y;
 
                         tracker->clear();
+                        
+#if KCF_NAME
                         tracker = cv::TrackerKCF::create();
+#else
+                        tracker = cv::Tracker::create(TRACKING_METHOD);
+#endif
                         tracker->init(img,bbox);
 
                     }
                     //Single-object detection
                     else
-                    {
+                    { 
+                        printf("\x1b[42m SINGLE OBJECTS \x1b[0m\n");
                         bbox.height = min_rect.height;
                         bbox.width = min_rect.width;
                         bbox.x = min_rect.x;
                         bbox.y = min_rect.y;
+
+                        std::cout << bbox << std::endl;
                         tracker->clear();
+
+#if KCF_NAME
                         tracker = cv::TrackerKCF::create();
+#else
+                        tracker = cv::Tracker::create(TRACKING_METHOD);
+#endif
                         tracker->init(img,bbox);
 
 
@@ -879,6 +929,7 @@ void *detection_handler(void *arg)
                 //Detection fail error
                 else
                 {
+                    printf("\x1b[32m NO OBJECTS \x1b[0m\n");
                     pthread_mutex_lock(&track_mutex);
                     is_detect_run = true;
                     is_detect_thisframe = true;
@@ -932,8 +983,11 @@ void *detection_handler(void *arg)
                     draw_bbox.y = 0;
                 }
                 testout << "draw_bbox " << draw_bbox <<endl;	
-
+                
+                //for drawing. 
                 rectangle(img,draw_bbox, cv::Scalar(255,0,0),2,1);
+                
+                //for tracking. tracker use only this box 
                 rectangle(img, bbox, cv::Scalar(255,0,0),2,1);
 
 
@@ -986,8 +1040,8 @@ void *detection_handler(void *arg)
                     frame_fontScale, frame_thickness, &frame_baseline);
             frame_baseline += frame_thickness;
             cv::Point frame_textOrg(100 - frame_textSize.width/2 ,100 - frame_textSize.height/2);
-            putText(img, frame_text, frame_textOrg, frame_fontFace, frame_fontScale,
-                    cv::Scalar(128,128,128), frame_thickness, 8);
+            //putText(img, frame_text, frame_textOrg, frame_fontFace, frame_fontScale,
+            //        cv::Scalar(128,128,128), frame_thickness, 8);
             cv::imshow("test",img);
             cv::waitKey(30);   
             ++frame_count;
