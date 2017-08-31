@@ -71,9 +71,9 @@ using namespace std;
 int clnt_sock;
 
 //for debugging and logging
-#define USE_STREAM 1
+#define USE_STREAM 0
 #define GCS_STREAM 0 
-#define NORM_LOG_ENABLED 0
+#define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
 
 typedef std::ostream& (*manip) (std::ostream&);
@@ -548,8 +548,8 @@ void *detection_handler(void *arg)
         for (int i = 0; i < detections.size(); ++i) {
             vector<float> &d_ = detections[i];
             // Detection format: [image_id, label, score, xmin, ymin, xmax, ymax].
-            CHECK_EQ(d.size(), 7);
-            const float score = d[2];
+            CHECK_EQ(d_.size(), 7);
+            const float score = d_[2];
 
             if (score >= confidence_threshold) {
                 object_number++;
@@ -598,30 +598,47 @@ void *detection_handler(void *arg)
         {
             rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
             cv::imshow("output", img);
+            cv::waitKey(30);   
         }
-
         //tracker initialization
-        cv::Ptr<cv::Tracker> tracker = cv::TrackerKCF::create();
+        //cv::Ptr<cv::Tracker> tracker = cv::TrackerKCF::create();
+        printf("test 1\n");
+        cv::Ptr<cv::Tracker> tracker = cv::Tracker::create("KCF");
+        printf("test 2\n");
+        std::cout << bbox << std::endl;
+        bbox.x = 100;
+        bbox.y = 100;
+        bbox.width = 100;
+        bbox.height = 100;
         tracker->init(img, bbox);
+        printf("test 3\n");
 
         //tracking
         for(int i = 0; i < track_frame_num; i++)
         {
+        printf("test 4\n");
             bool success = cap.read(img);
+        printf("test 5\n");
             if(!success)
             {
+        printf("test 6\n");
                 LOG(INFO) << "Process " << std::endl;
                 break;
             }
+        printf("test 7\n");
             tracker->update(img, bbox);
 
+        printf("test 8\n");
             //visualize tracking
             if(visualize_tracking_enable)
             {
+        printf("test 9\n");
                 rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
                 cv::imshow("output", img);
+                cv::waitKey(30);   
             }
         }
+        printf("test 10\n");
         tracker->clear();
     }
 
@@ -629,7 +646,6 @@ void *detection_handler(void *arg)
     if (cap.isOpened()) {
         cap.release();
     }
-
 
     /*
     cv::namedWindow("output",1);
