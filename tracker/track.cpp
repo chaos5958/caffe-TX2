@@ -71,7 +71,7 @@ using namespace std;
 int clnt_sock;
 
 //for debugging and logging
-#define USE_STREAM 0
+#define USE_STREAM 1
 #define GCS_STREAM 1 
 #define NORM_LOG_ENABLED 0
 #define TEST_LOG_ENABLED 1 
@@ -603,6 +603,7 @@ void *detection_handler(void *arg)
 
                 if(!is_first_detect || is_detect_thisframe)
                 {
+                    printf("\x1b[44m first if \x1b[0m \n");
                     logout << "image row: " << img.rows << " image col: " << img.cols << std::endl;
                     //top_left_x = std::max(static_cast<int>(bbox.x - bbox.width* CROP_RATIO), 0); 
                     //top_left_x = std::min(top_left_x, img.cols);
@@ -664,6 +665,7 @@ void *detection_handler(void *arg)
                 }
                 else
                 {
+                    printf("\x1b[44m first else \x1b[0m\n");
                     testout<< "first detect !!!!!!!!!!!!!!!!!"<<endl;
                     top_left_x = 280, top_left_y = 0, tmp_width = 0, tmp_height = 0;
                     sub_img = img(cv::Rect(280,0,720,720));
@@ -1198,6 +1200,7 @@ void *network_handler(void *arg)
         //Detect on a whole image
         else if(cmd.asString().compare("redetect") == 0)
         {
+            printf("\x1b[45m redetect command in \x1b[0m\n");
             pthread_mutex_lock(&track_mutex);
             is_detect_run = true;
             is_detect_thisframe = true; 
