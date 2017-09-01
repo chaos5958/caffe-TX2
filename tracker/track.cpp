@@ -545,15 +545,18 @@ void *detection_handler(void *arg)
 
         //dtection: threshold filter
         vector<float> d;
+        
         for (int i = 0; i < detections.size(); ++i) {
             vector<float> &d_ = detections[i];
             // Detection format: [image_id, label, score, xmin, ymin, xmax, ymax].
             CHECK_EQ(d_.size(), 7);
             const float score = d_[2];
 
+            // check d_[1] 
             if (score >= confidence_threshold) {
                 object_number++;
             }
+           
 
             d = d_;
         } 
@@ -567,6 +570,7 @@ void *detection_handler(void *arg)
         //detection: multiple objects
         else if(object_number > 1)
         {
+
         }
         //detection: single object
         else
@@ -605,11 +609,13 @@ void *detection_handler(void *arg)
         printf("test 1\n");
         cv::Ptr<cv::Tracker> tracker = cv::Tracker::create("KCF");
         printf("test 2\n");
+        std::cout << "\x1b[41m ";
         std::cout << bbox << std::endl;
-        bbox.x = 100;
-        bbox.y = 100;
-        bbox.width = 100;
-        bbox.height = 100;
+        //bbox.x = 1;
+        //bbox.y = 1;
+        bbox.width = 1;
+        bbox.height = 1;
+        std::cout << "\x1b[0m ";
         tracker->init(img, bbox);
         printf("test 3\n");
 

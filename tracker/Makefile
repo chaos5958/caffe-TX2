@@ -22,12 +22,12 @@ MYLIBS+= -L../build/lib/ \
 	-lboost_filesystem -lboost_regex -lm -lhdf5_hl -lhdf5 -lleveldb -lsnappy \
 	-llmdb -lopencv_core -lopencv_highgui -lopencv_imgproc -lopencv_imgcodecs \
 	-lopencv_videoio -lboost_thread -lstdc++ -lcudnn -lcblas -latlas 
-all:  track
 FLAGES_LIBS = `pkg-config opencv --cflags --libs`
-#json: json.cpp
-#	sudo g++ -c json.cpp
-track: track.cpp
+all: json.o track
+json.o: json.cpp
 	sudo g++ -c json.cpp
+
+track: track.cpp
 	sudo g++ -o $@ $< $(JSONFLAGS) $(CFLAGES) $(MYFLAGES) json.o $(LIBS) $(MYLIBS)
 clean: 
 	sudo rm track json.o
