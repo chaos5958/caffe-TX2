@@ -75,6 +75,7 @@ int clnt_sock;
 #define GCS_STREAM 0 
 #define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
+#define USE_TrackerKCF 1
 
 typedef std::ostream& (*manip) (std::ostream&);
 struct normlogger
@@ -142,13 +143,23 @@ int frame_rate = 10;
 int buffer_size = 1; 
 
 bool initial_crop_enable = false;
+
 bool detection_crop_enable = false;
 bool tracking_crop_enable = false;
 bool visualize_detection_enable = true;
 bool visualize_tracking_enable = true;
 
 int track_frame_num = 30;
+int object_type = 15; 
+int selection_policy = 1;
+int color_confidence_ratio = 0.05;
 
+int iLowH = 0;
+int iHighH = 35;
+int iLowS = 100;
+int iHighS = 255;
+int iLowV = 100;
+int iHighV = 255;
 
 #define CAR 0
 #define HUMAN 1
@@ -518,6 +529,20 @@ void *detection_handler(void *arg)
 
     while(1)
     {
+        pthread_mutex_lock(&track_mutex);
+        while(!is_detect_run && !is_quit)
+            pthread_cond_wait(&track_cond, &track_mutex);  
+
+
+        if(is_quit)
+        {
+            pthread_mutex_unlock(&track_mutex);
+            cap.release();
+            testout << "detection thread ends" << std::endl;
+            pthread_exit(NULL);
+        }
+        pthread_mutex_unlock(&track_mutex);
+
         cv::Mat img, img_process;
         bool success = cap.read(img);
         if(!success)
@@ -539,39 +564,98 @@ void *detection_handler(void *arg)
         {
         }
 
-        int object_number = 0;
         //detection: run  
         std::vector<vector<float> > detections = detector.Detect(img_process);
 
+
         //dtection: threshold filter
-        vector<float> d;
+        std::vector<vector<float> > targets;
         for (int i = 0; i < detections.size(); ++i) {
             vector<float> &d_ = detections[i];
             // Detection format: [image_id, label, score, xmin, ymin, xmax, ymax].
             CHECK_EQ(d_.size(), 7);
             const float score = d_[2];
 
-            if (score >= confidence_threshold) {
-                object_number++;
+            if (d_[1] == object_type && score >= confidence_threshold) {
+                targets.push_back(d_);
             }
-
-            d = d_;
         } 
 
-        logout << "object number: " << object_number << std::endl;
 
+        vector<float> d;
         //detection: fail
-        if(object_number == 0)
+        if(targets.size() == 0)
         {
+            continue;
         }
         //detection: multiple objects
-        else if(object_number > 1)
+        else if(targets.size() > 1)
         {
+            //selection policy
+            switch(selection_policy)
+            {
+                //neareset neighbor
+                case 0: 
+                    break;
+                //color based detection
+                case 1:
+                    {
+                    int max_index = -1;
+                    double max_value = 0;
+                    for(int i = 0; i < targets.size(); i++)
+                    {
+                        cv::Mat roi_HSV, roi_thresholded;
+                        cv::Mat roi(img, cv::Rect(targets[i][3] * img.cols, targets[i][4] * img.rows, 
+                                (targets[i][5] - targets[i][3]) * img.cols,
+                                (targets[i][6] - targets[i][4]) * img.rows));
+;                       cv::cvtColor(roi, roi_HSV, cv::COLOR_BGR2HSV);
+                        cv::inRange(roi_HSV, cv::Scalar(iLowH, iLowS, iLowV), cv::Scalar(iHighH, iHighS, iHighV), roi_thresholded); 
+                        int score_input = cv::sum(roi_thresholded)[0] / 255; 
+                        double score = (double)score_input / (double)roi_thresholded.total();
+
+                        //std::cout << "score_input: " << score_input << "roi_total: " << roi_thresholded.total() << "score: " << score << std::endl;
+
+                        if(score > color_confidence_ratio)
+                        {
+                            if(score > max_value)
+                            {
+                                max_value = score;
+                                max_index = i;
+                            }
+                        }
+                    }
+
+                    //error - no objects 
+                    if(max_index == -1)
+                    {
+                        std::cerr << "multiple objects: no targets" << std::endl
+                            << "max_score: " << max_value << std::endl;   
+                        continue;
+                    }
+
+                    d = targets[max_index];
+
+                    /* debugging - hhyeo
+                    cv::Mat testimg(img, cv::Rect(targets[max_index][3] * img.cols, targets[max_index][4] * img.rows, 
+                                (targets[max_index][5] - targets[max_index][3]) * img.cols,
+                                (targets[max_index][6] - targets[max_index][4]) * img.rows));
+
+                    cv::imshow("output", testimg);
+                    cv::waitKey(30); 
+                    */
+
+                    break;
+                    }
+                default:
+                    break;
+            }
         }
         //detection: single object
         else
         {
         }
+
+        continue;
 
         cv::Rect2d bbox;
 
@@ -603,7 +687,11 @@ void *detection_handler(void *arg)
         //tracker initialization
         //cv::Ptr<cv::Tracker> tracker = cv::TrackerKCF::create();
         printf("test 1\n");
+#if USE_TrackerKCF
+        cv::Ptr<cv::TrackerKCF> tracker = cv::TrackerKCF::create();
+#else
         cv::Ptr<cv::Tracker> tracker = cv::Tracker::create("KCF");
+#endif
         printf("test 2\n");
         std::cout << bbox << std::endl;
         bbox.x = 100;
@@ -730,7 +818,7 @@ void *detection_handler(void *arg)
                 {
                     //YHH's code
                     //tmp_height = (img.rows - top_left_y)/2;
-                    tmp_height = (img.rows - top_left_y);
+                    //tmp_height = (img.rows - top_left_y);
                 }
                 else if(top_left_y <= 0){
                     top_left_y = 0;
