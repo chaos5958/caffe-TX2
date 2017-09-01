@@ -71,7 +71,7 @@ using namespace std;
 int clnt_sock;
 
 //for debugging and logging
-#define USE_STREAM 0
+#define USE_STREAM 1
 #define GCS_STREAM 0 
 #define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
@@ -145,7 +145,7 @@ int buffer_size = 1;
 bool initial_crop_enable = false;
 
 bool detection_crop_enable = false;
-bool tracking_crop_enable = false;
+bool tracking_crop_enable = true;
 bool visualize_detection_enable = true;
 bool visualize_tracking_enable = true;
 
@@ -649,6 +649,7 @@ void *detection_handler(void *arg)
                 default:
                     break;
             }
+
         }
         //detection: single object
         else
@@ -658,23 +659,72 @@ void *detection_handler(void *arg)
         continue;
 
         cv::Rect2d bbox;
+        cv::Rect2d draw_bbox;
+
+        int track_max_width = 200;
+        int track_max_height = 200;
+
+        int reduce_x = 0;
+        int reduce_y = 0;
+        int reduce_width = 0;
+        int reduce_height = 0;
+        int my_width, my_height;
 
         //postprocess - determine bbox
         if(initial_crop_enable)
         {
         }
+        // detection and tracking crop should be separated with this if-statement
         else if(detection_crop_enable)
         {
         }
         else if(tracking_crop_enable)
         {
+            //draw bbox for drawing
+            //Tracker uses only cropped bbox
+            
+            draw_bbox.width = static_cast<int> (d[5] * img.cols - d[3] * img.cols);
+            draw_bbox.height = static_cast<int> (d[6] * img.rows - d[4] * img.rows);
+            draw_bbox.x = static_cast<int> (d[3]* img.cols);  
+            draw_bbox.y = static_cast<int> (d[4]* img.rows);
+
+            my_width = draw_bbox.width;
+            my_height = draw_bbox.height;
+            
+            //reduce x calculation
+            if(my_width > track_max_width){
+                reduce_width = my_width - track_max_width;
+                reduce_x = (my_width - track_max_width)/2;
+                bbox.x = draw_bbox.x + reduce_x;
+                bbox.width = track_max_width;
+            }
+            else{
+                reduce_width = 0;
+                reduce_x = 0;
+                bbox.x = draw_bbox.x;
+                bbox.width = my_width;
+            }
+            //reduce y calculation
+            if(my_height > track_max_height){
+                reduce_height = my_height - track_max_height;
+                reduce_y = (my_height - track_max_height)/2;
+                bbox.y = draw_bbox.y + reduce_y;
+                bbox.height = track_max_height;
+            }
+            else{
+                reduce_height = 0;
+                reduce_y = 0;
+                bbox.y = draw_bbox.y;
+                bbox.height = my_height;
+            }
+
         }
         else
         {
-            bbox.width = d[5] * img.cols - d[3] * img.cols;
-            bbox.height = d[6] * img.rows - d[4] * img.rows;
-            bbox.x = d[3];  
-            bbox.y = d[4]; 
+            bbox.width = static_cast<int> (d[5] * img.cols - d[3] * img.cols);
+            bbox.height = static_cast<int> (d[6] * img.rows - d[4] * img.rows);
+            bbox.x = static_cast<int> (d[3]* img.cols);  
+            bbox.y = static_cast<int> (d[4]* img.rows); 
         }
 
         //visualize detection
@@ -686,47 +736,58 @@ void *detection_handler(void *arg)
         }
         //tracker initialization
         //cv::Ptr<cv::Tracker> tracker = cv::TrackerKCF::create();
-        printf("test 1\n");
 #if USE_TrackerKCF
         cv::Ptr<cv::TrackerKCF> tracker = cv::TrackerKCF::create();
 #else
         cv::Ptr<cv::Tracker> tracker = cv::Tracker::create("KCF");
 #endif
-        printf("test 2\n");
         std::cout << bbox << std::endl;
         bbox.x = 100;
         bbox.y = 100;
         bbox.width = 100;
         bbox.height = 100;
         tracker->init(img, bbox);
-        printf("test 3\n");
 
         //tracking
         for(int i = 0; i < track_frame_num; i++)
         {
-        printf("test 4\n");
             bool success = cap.read(img);
-        printf("test 5\n");
             if(!success)
             {
-        printf("test 6\n");
                 LOG(INFO) << "Process " << std::endl;
                 break;
             }
-        printf("test 7\n");
             tracker->update(img, bbox);
 
-        printf("test 8\n");
             //visualize tracking
             if(visualize_tracking_enable)
             {
-        printf("test 9\n");
-                rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
-                cv::imshow("output", img);
-                cv::waitKey(30);   
+                if(tracking_crop_enable){
+                    //draw_bbox update
+                    draw_bbox.x = bbox.x - reduce_x;
+                    draw_bbox.y = bbox.y - reduce_y;
+                    draw_bbox.width = bbox.width +reduce_width;
+                    draw_bbox.height = bbox.height + reduce_height;
+
+                    if(draw_bbox.x <=0){
+                        draw_bbox.x = 0;
+                    }
+                    if(draw_bbox.y <=0){
+                        draw_bbox.y = 0;
+                    }
+
+                    rectangle(img, draw_bbox, cv::Scalar(255,255,0), 2, 1);
+                    rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
+                    cv::imshow("output", img);
+                    cv::waitKey(30);   
+                }
+                else{
+                    rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
+                    cv::imshow("output", img);
+                    cv::waitKey(30);   
+                }
             }
         }
-        printf("test 10\n");
         tracker->clear();
     }
 
@@ -842,7 +903,7 @@ void *detection_handler(void *arg)
 
             int my_width, my_height;
             int x_avg, y_avg, count_car = 0, count_person = 0;
-            cv::Rect2d min_rect(0,0,1,1);
+            cv::Rect2d bbox(0,0,1,1);
             float min_distance = 0;
             float max_score = 0;
             // Print the detection results. 
@@ -916,37 +977,37 @@ void *detection_handler(void *arg)
                                 //	printf("exceed width !!!!!!!!!!!\n");
                                 reduce_width = my_width - max_width;
                                 reduce_x = (my_width - max_width)/2;
-                                min_rect.x = d[3]*sub_img.cols + top_left_x + reduce_x;
-                                min_rect.width = max_width;
+                                bbox.x = d[3]*sub_img.cols + top_left_x + reduce_x;
+                                bbox.width = max_width;
                             }
                             else{
                                 reduce_width = 0;
                                 reduce_x = 0;
-                                min_rect.x = d[3]*sub_img.cols + top_left_x;
-                                min_rect.width = my_width;
+                                bbox.x = d[3]*sub_img.cols + top_left_x;
+                                bbox.width = my_width;
                             }
                             if(my_height > max_height){
                                 //printf("exceed height !!!!!!!!!!\n");
                                 reduce_height = my_height - max_height;
                                 reduce_y = (my_height - max_height)/2;
-                                min_rect.y = d[4]*sub_img.rows + top_left_y + reduce_y;
-                                min_rect.height = max_height;
+                                bbox.y = d[4]*sub_img.rows + top_left_y + reduce_y;
+                                bbox.height = max_height;
                             }
                             else{
                                 reduce_height = 0;
                                 reduce_y = 0;
-                                min_rect.y = d[4]*sub_img.rows + top_left_y;
-                                min_rect.height = my_height;
+                                bbox.y = d[4]*sub_img.rows + top_left_y;
+                                bbox.height = my_height;
                             }
-                               //min_rect.x = d[3]*sub_img.cols + top_left_x;
-                               //min_rect.y = d[4]*sub_img.rows + top_left_y;
-                               //min_rect.height = my_height;
-                               //min_rect.width = my_width; 
+                               //bbox.x = d[3]*sub_img.cols + top_left_x;
+                               //bbox.y = d[4]*sub_img.rows + top_left_y;
+                               //bbox.height = my_height;
+                               //bbox.width = my_width; 
                             max_score = score;
                         }
 
-                        logout << "det_height: " << min_rect << std::endl;
-                        testout << "det_height: " << min_rect << std::endl;
+                        logout << "det_height: " << bbox << std::endl;
+                        testout << "det_height: " << bbox << std::endl;
                         logout << "min_distance: " << min_distance << std::endl;
                         testout << "min_distance: " << min_distance << std::endl;
                         detect_success = true;
@@ -974,17 +1035,17 @@ void *detection_handler(void *arg)
                         if ( cur_distance < min_distance || min_distance == 0){
                             min_distance = cur_distance;
 
-                            min_rect.x = d[3]*sub_img.cols + top_left_x;
-                            min_rect.y = d[4]*sub_img.rows + top_left_y;
-                            min_rect.height = my_height;
-                            min_rect.width = my_width;
+                            bbox.x = d[3]*sub_img.cols + top_left_x;
+                            bbox.y = d[4]*sub_img.rows + top_left_y;
+                            bbox.height = my_height;
+                            bbox.width = my_width;
 
                         } 
                            //bbox.height = my_height;
                            //bbox.width = my_width;
                            //bbox.x = d[3]*sub_img.cols + top_left_x;
                            //bbox.y = d[4]*sub_img.rows + top_left_y;
-                        logout << min_rect << std::endl;
+                        logout << bbox << std::endl;
                         logout << "min_distance: " << min_distance << std::endl;
                         detect_success = true;
                         count_car++;
@@ -996,8 +1057,8 @@ void *detection_handler(void *arg)
             //TODO : if minimum distance is larger than bbox, tracker use old box.
             // do not update bbox
 
-            //std::cout << "minx" << min_rect.x + min_rect.width/2 << "miny" << min_rect.y + min_rect.height/2 << std::endl;
-            //containPoint(bbox, min_rect.x + min_rect.width/2, min_rect.y + min_rect.height/2)
+            //std::cout << "minx" << bbox.x + bbox.width/2 << "miny" << bbox.y + bbox.height/2 << std::endl;
+            //containPoint(bbox, bbox.x + bbox.width/2, bbox.y + bbox.height/2)
             //if (detect_success && min_distance < std::max(bbox.width, bbox.height) * 1)
             if(detect_success)
             {
@@ -1023,10 +1084,10 @@ void *detection_handler(void *arg)
                         continue;
                     }
                     //for debugging 	
-                    bbox.height = min_rect.height;
-                    bbox.width = min_rect.width;
-                    bbox.x = min_rect.x;
-                    bbox.y = min_rect.y;
+                    bbox.height = bbox.height;
+                    bbox.width = bbox.width;
+                    bbox.x = bbox.x;
+                    bbox.y = bbox.y;
 
                     tracker->clear();
                     tracker = cv::Tracker::create(TRACKING_METHOD);
@@ -1036,10 +1097,10 @@ void *detection_handler(void *arg)
                 //Single-object detection
                 else
                 {
-                    bbox.height = min_rect.height;
-                    bbox.width = min_rect.width;
-                    bbox.x = min_rect.x;
-                    bbox.y = min_rect.y;
+                    bbox.height = bbox.height;
+                    bbox.width = bbox.width;
+                    bbox.x = bbox.x;
+                    bbox.y = bbox.y;
                     tracker->clear();
                     tracker = cv::Tracker::create(TRACKING_METHOD);
                     tracker->init(img,bbox);
