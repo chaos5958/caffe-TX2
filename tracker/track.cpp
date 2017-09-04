@@ -79,45 +79,6 @@ using namespace std;
 #define TEST_LOG_ENABLED 1 
 #define USE_TrackerKCF 1
 
-typedef std::ostream& (*manip) (std::ostream&);
-struct normlogger
-{
-    template< typename T >
-        normlogger &operator<<(const T &val)
-        {
-            if(NORM_LOG_ENABLED)
-                std::cout<<val;
-            return *this;
-        }
-
-    normlogger &operator<<(manip manipulator)
-    {
-        if(NORM_LOG_ENABLED)
-            std::cout<<manipulator;
-        return *this;
-    }
-};
-
-struct testlogger
-{
-    template< typename T >
-        testlogger &operator<<(const T &val)
-        {
-            if(TEST_LOG_ENABLED)
-                std::cout<<val;
-            return *this;
-        }
-
-    testlogger &operator<<(manip manipulator)
-    {
-        if(TEST_LOG_ENABLED)
-            std::cout<<manipulator;
-        return *this;
-    }
-};
-
-
->>>>>>> b72994f58edd7df119eccd657dabbb8eeaf6844a
 #define NETWORK_DEBUG 0 
 //for developing
 
@@ -130,7 +91,7 @@ pthread_mutex_t track_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //Variables shared between threads
 bool is_detect_run = false;
-bool is_detect_thisframe = false;
+bool is_redetect = false;
 bool is_stream = false;
 bool is_quit = false;
 
@@ -918,6 +879,13 @@ void *detection_handler(void *arg)
             if(is_quit)
                 break;
 
+            if(is_redetect)
+            {
+                initial_crop_enable = true;
+                detection_crop_enable = true;
+                break;
+            }
+
             bool success = cap.read(img);
             if(!success)
             {
@@ -1069,7 +1037,7 @@ void *network_handler(void *arg)
 
                 pthread_mutex_lock(&track_mutex);
                 is_detect_run = true;
-                is_detect_thisframe = true; 
+                is_redetect = true; 
                 pthread_mutex_unlock(&track_mutex);
                 pthread_cond_signal(&track_cond);
             }
@@ -1119,7 +1087,7 @@ void *network_handler(void *arg)
         {
             pthread_mutex_lock(&track_mutex);
             is_detect_run = true;
-            is_detect_thisframe = true; 
+            is_redetect = true; 
             pthread_mutex_unlock(&track_mutex);
             pthread_cond_signal(&track_cond);
 
