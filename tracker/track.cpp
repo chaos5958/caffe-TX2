@@ -78,7 +78,7 @@ int clnt_sock;
 #define GCS_STREAM 0 
 #define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
-#define USE_TrackerKCF 0
+#define USE_TrackerKCF 1
 
 typedef std::ostream& (*manip) (std::ostream&);
 struct normlogger
@@ -147,7 +147,6 @@ int buffer_size = 1;
 int send_msg_per_frame = 1; // send tracking result per XXX frame, 1 is default sending every frame's result
 
 bool initial_crop_enable = false;
-
 bool detection_crop_enable = false;
 bool tracking_crop_enable = true;
 bool visualize_detection_enable = true;
@@ -542,12 +541,10 @@ void *detection_handler(void *arg)
 
     while(1)
     {
-        printf("test 1\n");
         pthread_mutex_lock(&track_mutex);
         while(!is_detect_run && !is_quit)
             pthread_cond_wait(&track_cond, &track_mutex);  
 
-        printf("test 2\n");
         if(is_quit)
         {
             pthread_mutex_unlock(&track_mutex);
@@ -555,28 +552,22 @@ void *detection_handler(void *arg)
             testout << "detection thread ends" << std::endl;
             pthread_exit(NULL);
         }
-        printf("test 3\n");
         pthread_mutex_unlock(&track_mutex);
-        printf("test 3.1\n");
 
         cv::Mat img, img_process;
-        printf("test 3.2\n");
 
         bool success = cap.read(img);
-        printf("test 3.3\n");
         if(!success)
         {
             LOG(INFO) << "Process " << std::endl;
             break;
         }
-        printf("test 4\n");
         
         img_process = img;
 
         //preprocess
         if(initial_crop_enable)
         {
-            printf("test 5\n");
             //our case 1280 * 720 
             if(img.cols > img.rows){
                 top_left_x = (img.cols - img.rows )/2; // (1280 - 720 )/2 = 280;
@@ -595,7 +586,6 @@ void *detection_handler(void *arg)
         }
         else if(detection_crop_enable)
         {
-            printf("test 6\n");
             if(tracking_crop_enable){
                 top_left_x = std::max(static_cast<int>(draw_bbox.x - draw_bbox.width* CROP_RATIO), 0);
                 top_left_y = std::max(static_cast<int>(draw_bbox.y - draw_bbox.height* CROP_RATIO), 0);
@@ -603,13 +593,11 @@ void *detection_handler(void *arg)
                 crop_box_height = std::min(static_cast<int>((draw_bbox.y - top_left_y) * 2 + draw_bbox.height), MIN_CROP_HEIGHT);
             }
             else{
-                printf("test 7\n");
                 top_left_x = std::max(static_cast<int>(bbox.x - bbox.width* CROP_RATIO), 0);
                 top_left_y = std::max(static_cast<int>(bbox.y - bbox.height* CROP_RATIO), 0);
                 crop_box_width = std::min(static_cast<int>((bbox.x - top_left_x) * 2 + bbox.width), MIN_CROP_WIDTH);
                 crop_box_height = std::min(static_cast<int>((bbox.y - top_left_y) * 2 + bbox.height), MIN_CROP_HEIGHT);   
             }
-            printf("test 8\n");
             //minimum cropped image size is caffe input size
             int max_crop_x;
             int max_crop_y;
@@ -620,25 +608,21 @@ void *detection_handler(void *arg)
                 top_left_x = max_crop_x;
                 crop_box_width = MIN_CROP_WIDTH;
             }
-            printf("test 9\n");
             if(top_left_y >= max_crop_y){
                 top_left_y = max_crop_y;
                 crop_box_height = MIN_CROP_HEIGHT;
             }
-            printf("test 10\n");
             if (top_left_x + crop_box_width > img.cols)
             {
                 //YHH's code
                 //crop_box_width = (img.cols - top_left_x)/2;
                 crop_box_width = (img.cols - top_left_x);
-                printf("test 11\n");
             }
             
             //error handling
             else if(top_left_x <= 0){
                 top_left_x = 0;
             }
-            printf("test 12\n");
             if (top_left_y + crop_box_height > img.rows)
             {
                 //YHH's code
@@ -652,9 +636,7 @@ void *detection_handler(void *arg)
         }
         else
         {
-            printf("test 12.1\n");
         }
-        printf("test 13\n");
         //detection: run  
         std::vector<vector<float> > detections = detector.Detect(img_process);
         //dtection: threshold filter
@@ -669,7 +651,6 @@ void *detection_handler(void *arg)
                 targets.push_back(d_);
             }
         } 
-        printf("test 14\n");
         vector<float> d;
         //detection: fail
         if(targets.size() == 0)
