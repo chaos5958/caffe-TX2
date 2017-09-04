@@ -955,7 +955,7 @@ void *detection_handler(void *arg)
                 testout << "draw_bbox " << draw_bbox <<endl;	
 
                 rectangle(img,draw_bbox, cv::Scalar(255,0,0),2,1);
-                rectangle(img, bbox, cv::Scalar(255,0,0),2,1);
+                //rectangle(img, bbox, cv::Scalar(255,0,0),2,1);
 
 
                 logout << bbox << std::endl;
