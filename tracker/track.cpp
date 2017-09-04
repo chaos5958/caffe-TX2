@@ -868,7 +868,13 @@ void *detection_handler(void *arg)
 
             rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
         }
-
+        
+        if(GCS_STREAM)
+        {
+            cv::Mat img_stream;
+            cv::resize(img, img_stream, cv::Size(640, 480));
+            gcs_writer << img_stream;
+        }
         //visualize detection
         if(visualize_detection_enable)
         {
