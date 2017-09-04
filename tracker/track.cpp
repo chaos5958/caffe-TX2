@@ -72,9 +72,9 @@ int clnt_sock;
 
 //for debugging and logging
 #define USE_STREAM 1
-#define GCS_STREAM 0 
+#define GCS_STREAM 1
 #define NORM_LOG_ENABLED 0
-#define TEST_LOG_ENABLED 1 
+#define TEST_LOG_ENABLED 0
 
 typedef std::ostream& (*manip) (std::ostream&);
 struct normlogger
@@ -519,6 +519,7 @@ void *detection_handler(void *arg)
     
     if(GCS_STREAM)
     {
+      //writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=143.248.53.74 port=5000", 0, (double)30, cv::Size(640, 480), true); 
         writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=223.171.33.71 port=5000", 0, (double)30, cv::Size(640, 480), true); 
 
         if (!writer.isOpened()) {
