@@ -65,6 +65,9 @@ using namespace std;
 #define TRACKING_METHOD "KCF"
 #define CROP_RATIO 0.5
 
+#define MIN_CROP_WIDTH  300 //caffe-ssd input width
+#define MIN_CROP_HEIGHT 300 //caffe-ssd input height
+
 //for networking
 #define BUF_SIZE 4096 
 #define LISTEN_PORT "44444"
@@ -75,7 +78,7 @@ int clnt_sock;
 #define GCS_STREAM 0 
 #define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
-#define USE_TrackerKCF 1
+#define USE_TrackerKCF 0
 
 typedef std::ostream& (*manip) (std::ostream&);
 struct normlogger
@@ -513,7 +516,7 @@ void *detection_handler(void *arg)
     if(!USE_STREAM)
         cap = cv::VideoCapture((input_args->operator[](2)));
     else{
-        cap = cv::VideoCapture(1);
+        cap = cv::VideoCapture(0);
         cap.set(CV_CAP_PROP_FRAME_WIDTH, frame_width);	
         cap.set(CV_CAP_PROP_FRAME_HEIGHT, frame_height);
         cap.set(CV_CAP_PROP_FPS, frame_rate);
@@ -527,13 +530,22 @@ void *detection_handler(void *arg)
     //initialization window 
     cv::namedWindow("output", 1);
 
+    int top_left_x;
+    int top_left_y;
+    int crop_box_width;
+    int crop_box_height;
+
+    cv::Rect2d bbox;
+    cv::Rect2d draw_bbox;
+
     while(1)
     {
+        printf("test 1\n");
         pthread_mutex_lock(&track_mutex);
         while(!is_detect_run && !is_quit)
             pthread_cond_wait(&track_cond, &track_mutex);  
 
-
+        printf("test 2\n");
         if(is_quit)
         {
             pthread_mutex_unlock(&track_mutex);
@@ -541,33 +553,108 @@ void *detection_handler(void *arg)
             testout << "detection thread ends" << std::endl;
             pthread_exit(NULL);
         }
+        printf("test 3\n");
         pthread_mutex_unlock(&track_mutex);
+        printf("test 3.1\n");
 
         cv::Mat img, img_process;
+        printf("test 3.2\n");
+
         bool success = cap.read(img);
+        printf("test 3.3\n");
         if(!success)
         {
             LOG(INFO) << "Process " << std::endl;
             break;
         }
+        printf("test 4\n");
         
         img_process = img;
 
         //preprocess
         if(initial_crop_enable)
         {
+            printf("test 5\n");
+            //our case 1280 * 720 
+            if(img.cols > img.rows){
+                top_left_x = (img.cols - img.rows )/2; // (1280 - 720 )/2 = 280;
+                top_left_y = 0;
+                crop_box_width = 0, crop_box_height = 0;
+            }
+            //maybe if we get a long height input 
+            else{
+                top_left_x = 0;
+                top_left_y = (img.rows - img.cols)/2;
+                crop_box_width = 0, crop_box_height = 0;
+            }
+            //img(cv::Rect(280,0,720,720));
+            img_process = img(cv::Rect(top_left_x,top_left_y, img.rows,img.rows));
+            initial_crop_enable = false;
         }
         else if(detection_crop_enable)
         {
+            printf("test 6\n");
+            if(tracking_crop_enable){
+                top_left_x = std::max(static_cast<int>(draw_bbox.x - draw_bbox.width* CROP_RATIO), 0);
+                top_left_y = std::max(static_cast<int>(draw_bbox.y - draw_bbox.height* CROP_RATIO), 0);
+                crop_box_width = std::min(static_cast<int>((draw_bbox.x - top_left_x) * 2 + draw_bbox.width), MIN_CROP_WIDTH);
+                crop_box_height = std::min(static_cast<int>((draw_bbox.y - top_left_y) * 2 + draw_bbox.height), MIN_CROP_HEIGHT);
+            }
+            else{
+                printf("test 7\n");
+                top_left_x = std::max(static_cast<int>(bbox.x - bbox.width* CROP_RATIO), 0);
+                top_left_y = std::max(static_cast<int>(bbox.y - bbox.height* CROP_RATIO), 0);
+                crop_box_width = std::min(static_cast<int>((bbox.x - top_left_x) * 2 + bbox.width), MIN_CROP_WIDTH);
+                crop_box_height = std::min(static_cast<int>((bbox.y - top_left_y) * 2 + bbox.height), MIN_CROP_HEIGHT);   
+            }
+            printf("test 8\n");
+            //minimum cropped image size is caffe input size
+            int max_crop_x;
+            int max_crop_y;
+            max_crop_x = img.cols - MIN_CROP_WIDTH; //1280-300 = 980;
+            max_crop_y = img.rows - MIN_CROP_HEIGHT; //720-300 = 420;
+            
+            if(top_left_x >= max_crop_x ){
+                top_left_x = max_crop_x;
+                crop_box_width = MIN_CROP_WIDTH;
+            }
+            printf("test 9\n");
+            if(top_left_y >= max_crop_y){
+                top_left_y = max_crop_y;
+                crop_box_height = MIN_CROP_HEIGHT;
+            }
+            printf("test 10\n");
+            if (top_left_x + crop_box_width > img.cols)
+            {
+                //YHH's code
+                //crop_box_width = (img.cols - top_left_x)/2;
+                crop_box_width = (img.cols - top_left_x);
+                printf("test 11\n");
+            }
+            
+            //error handling
+            else if(top_left_x <= 0){
+                top_left_x = 0;
+            }
+            printf("test 12\n");
+            if (top_left_y + crop_box_height > img.rows)
+            {
+                //YHH's code
+                //crop_box_height = (img.rows - top_left_y)/2;
+                crop_box_height = (img.rows - top_left_y);
+            }
+            else if(top_left_y <= 0){
+                top_left_y = 0;
+            }
+            img_process = img(cv::Rect(top_left_x, top_left_y, crop_box_width, crop_box_height));
         }
         else
         {
+            printf("test 12.1\n");
         }
-
+        printf("test 13\n");
         //detection: run  
         std::vector<vector<float> > detections = detector.Detect(img_process);
-
-
         //dtection: threshold filter
         std::vector<vector<float> > targets;
         for (int i = 0; i < detections.size(); ++i) {
@@ -580,8 +667,7 @@ void *detection_handler(void *arg)
                 targets.push_back(d_);
             }
         } 
-
-
+        printf("test 14\n");
         vector<float> d;
         //detection: fail
         if(targets.size() == 0)
@@ -605,10 +691,10 @@ void *detection_handler(void *arg)
                     for(int i = 0; i < targets.size(); i++)
                     {
                         cv::Mat roi_HSV, roi_thresholded;
-                        cv::Mat roi(img, cv::Rect(targets[i][3] * img.cols, targets[i][4] * img.rows, 
-                                (targets[i][5] - targets[i][3]) * img.cols,
-                                (targets[i][6] - targets[i][4]) * img.rows));
-;                       cv::cvtColor(roi, roi_HSV, cv::COLOR_BGR2HSV);
+                        cv::Mat roi(img_process, cv::Rect(targets[i][3] * img_process.cols, targets[i][4] * img_process.rows, 
+                                (targets[i][5] - targets[i][3]) * img_process.cols,
+                                (targets[i][6] - targets[i][4]) * img_process.rows));
+                        cv::cvtColor(roi, roi_HSV, cv::COLOR_BGR2HSV);
                         cv::inRange(roi_HSV, cv::Scalar(iLowH, iLowS, iLowV), cv::Scalar(iHighH, iHighS, iHighV), roi_thresholded); 
                         int score_input = cv::sum(roi_thresholded)[0] / 255; 
                         double score = (double)score_input / (double)roi_thresholded.total();
@@ -658,8 +744,6 @@ void *detection_handler(void *arg)
 
         continue;
 
-        cv::Rect2d bbox;
-        cv::Rect2d draw_bbox;
 
         int track_max_width = 200;
         int track_max_height = 200;
@@ -670,23 +754,34 @@ void *detection_handler(void *arg)
         int reduce_height = 0;
         int my_width, my_height;
 
-        //postprocess - determine bbox
-        if(initial_crop_enable)
-        {
-        }
-        // detection and tracking crop should be separated with this if-statement
-        else if(detection_crop_enable)
-        {
-        }
-        else if(tracking_crop_enable)
+        // //postprocess - determine bbox
+        // if(initial_crop_enable)
+        // {
+
+        // }
+        // // detection and tracking crop should be separated with this if-statement
+        // // before we start tracking, we should re-cordinate bbox or draw bbox
+        // else if(detection_crop_enable)
+        // {
+
+        // }
+        if(tracking_crop_enable)
         {
             //draw bbox for drawing
             //Tracker uses only cropped bbox
-            
-            draw_bbox.width = static_cast<int> (d[5] * img.cols - d[3] * img.cols);
-            draw_bbox.height = static_cast<int> (d[6] * img.rows - d[4] * img.rows);
-            draw_bbox.x = static_cast<int> (d[3]* img.cols);  
-            draw_bbox.y = static_cast<int> (d[4]* img.rows);
+            if(initial_crop_enable ||detection_crop_enable){
+                draw_bbox.width = static_cast<int> (d[5] * img_process.cols - d[3] * img_process.cols);
+                draw_bbox.height = static_cast<int> (d[6] * img_process.rows - d[4] * img_process.rows);
+                draw_bbox.x = static_cast<int> (d[3]* img_process.cols + top_left_x);  
+                draw_bbox.y = static_cast<int> (d[4]* img_process.rows + top_left_y);
+            }
+            else{
+                draw_bbox.width = static_cast<int> (d[5] * img_process.cols - d[3] * img_process.cols);
+                draw_bbox.height = static_cast<int> (d[6] * img_process.rows - d[4] * img_process.rows);
+                draw_bbox.x = static_cast<int> (d[3]* img_process.cols);  
+                draw_bbox.y = static_cast<int> (d[4]* img_process.rows);
+            }
+        
 
             my_width = draw_bbox.width;
             my_height = draw_bbox.height;
@@ -721,10 +816,18 @@ void *detection_handler(void *arg)
         }
         else
         {
-            bbox.width = static_cast<int> (d[5] * img.cols - d[3] * img.cols);
-            bbox.height = static_cast<int> (d[6] * img.rows - d[4] * img.rows);
-            bbox.x = static_cast<int> (d[3]* img.cols);  
-            bbox.y = static_cast<int> (d[4]* img.rows); 
+            if (initial_crop_enable ||detection_crop_enable){
+                bbox.width = static_cast<int> (d[5] * img_process.cols - d[3] * img_process.cols);
+                bbox.height = static_cast<int> (d[6] * img_process.rows - d[4] * img_process.rows);
+                bbox.x = static_cast<int> (d[3]* img_process.cols + top_left_x);  
+                bbox.y = static_cast<int> (d[4]* img_process.rows + top_left_y); 
+            }
+            else{
+                bbox.width = static_cast<int> (d[5] * img_process.cols - d[3] * img_process.cols);
+                bbox.height = static_cast<int> (d[6] * img_process.rows - d[4] * img_process.rows);
+                bbox.x = static_cast<int> (d[3]* img_process.cols);  
+                bbox.y = static_cast<int> (d[4]* img_process.rows);    
+            }
         }
 
         //visualize detection
@@ -795,446 +898,6 @@ void *detection_handler(void *arg)
     if (cap.isOpened()) {
         cap.release();
     }
-
-    /*
-    cv::namedWindow("output",1);
-
-
-    cv::Rect2d bbox(600,150,100,100);
-    cv::Rect2d draw_bbox(600,150,100,100);
-    float reduce_x = 0;
-    float reduce_y = 0;
-    float reduce_width = 0;
-    float reduce_height = 0;
-
-    bool is_first_detect = true;
-    bool detect_success = false;
-    bool send_track_result= false;
-    tracker->init(img, bbox);
-    int frame_count = 0, top_left_x = 0, top_left_y = 0, tmp_width = 0, tmp_height = 0;
-
-    clock_t send_track_timer;
-
-    while (true) {
-        pthread_mutex_lock(&track_mutex);
-        while(!is_detect_run && !is_quit)
-            pthread_cond_wait(&track_cond, &track_mutex);  
-
-
-        if(is_quit)
-        {
-            pthread_mutex_unlock(&track_mutex);
-            cap.release();
-            testout << "detection thread ends" << std::endl;
-            pthread_exit(NULL);
-        }
-        pthread_mutex_unlock(&track_mutex);
-
-        clock_t before_read_img;
-        double time_diff;
-        before_read_img = clock();
-        success = cap.read(img);
-        if (!success) {
-            LOG(INFO) << "Process " << frame_count << " frames from " << file;
-            //    pthread_mutex_unlock(&track_mutex);
-            break;
-        }
-        CHECK(!img.empty()) << "Error when read frame";
-
-        // detect objects 30 frames
-        if (frame_count % 30 == 0 || is_detect_thisframe){
-            //Crop image using prior tracking result
-
-            detect_success = false;
-
-            if(!is_first_detect || is_detect_thisframe)
-            {
-                logout << "image row: " << img.rows << " image col: " << img.cols << std::endl;
-                //top_left_x = std::max(static_cast<int>(bbox.x - bbox.width* CROP_RATIO), 0); 
-                //top_left_x = std::min(top_left_x, img.cols);
-                //top_left_y = std::max(static_cast<int>(bbox.y - bbox.height* CROP_RATIO), 0); 
-                //top_left_y = std::min(top_left_y, img.rows);
-                //tmp_width = (bbox.x - top_left_x) * 2 + bbox.width;
-                //tmp_height = (bbox.y - top_left_y) * 2 + bbox.height;
-                top_left_x = std::max(static_cast<int>(draw_bbox.x - draw_bbox.width* CROP_RATIO), 0); 
-                top_left_x = std::min(top_left_x, img.cols);
-                top_left_y = std::max(static_cast<int>(draw_bbox.y - draw_bbox.height* CROP_RATIO), 0); 
-                top_left_y = std::min(top_left_y, img.rows);
-
-                tmp_width = (draw_bbox.x - top_left_x) * 2 + draw_bbox.width;
-                tmp_height = (draw_bbox.y - top_left_y) * 2 + draw_bbox.height;
-
-                if (top_left_x + tmp_width > img.cols)
-                {
-                    //YHH's code
-                    //tmp_width = (img.cols - top_left_x)/2;
-                    tmp_width = (img.cols - top_left_x);
-                }
-                //error handling
-                else if(top_left_x <= 0){
-                    top_left_x = 0;
-                }
-
-                if (top_left_y + tmp_height > img.rows)
-                {
-                    //YHH's code
-                    //tmp_height = (img.rows - top_left_y)/2;
-                    //tmp_height = (img.rows - top_left_y);
-                }
-                else if(top_left_y <= 0){
-                    top_left_y = 0;
-                }
-                testout<< "before sub_img " << endl;
-                testout<< "x" << top_left_x <<" y"<< 
-                    top_left_y << "tmp_width" << tmp_width << "tmp_height " << tmp_height << endl;
-                sub_img = img(cv::Rect(top_left_x, top_left_y, tmp_width, tmp_height));  
-                testout<< "after  sub img " << endl;
-
-            }
-            else
-            {
-                testout<< "first detect !!!!!!!!!!!!!!!!!"<<endl;
-                top_left_x = 280, top_left_y = 0, tmp_width = 0, tmp_height = 0;
-                sub_img = img(cv::Rect(280,0,720,720));
-                is_first_detect = false;
-            }
-
-            std::vector<vector<float> > detections = detector.Detect(sub_img);
-
-            int my_width, my_height;
-            int x_avg, y_avg, count_car = 0, count_person = 0;
-            cv::Rect2d bbox(0,0,1,1);
-            float min_distance = 0;
-            float max_score = 0;
-            // Print the detection results. 
-            for (int i = 0; i < detections.size(); ++i) {
-                const vector<float>& d = detections[i];
-                // Detection format: [image_id, label, score, xmin, ymin, xmax, ymax].
-                CHECK_EQ(d.size(), 7);
-                const float score = d[2];
-
-                if (score >= confidence_threshold) {
-
-                    logout << file << "_";
-                    logout << std::setfill('0') << std::setw(6) << frame_count << " ";
-                    logout << static_cast<int>(d[1]) << " ";
-                    logout << score << " ";
-                    logout << static_cast<int>(d[3] * sub_img.cols) << " ";
-                    logout << static_cast<int>(d[4] * sub_img.rows) << " ";
-                    logout << static_cast<int>(d[5] * sub_img.cols) << " ";
-                    logout << static_cast<int>(d[6] * sub_img.rows) << std::endl;
-                    //          cv::line(sub_img, cv::Point(d[3]* sub_img.cols,d[4] * sub_img.rows), \
-                    //            cv::Point(d[5]*sub_img.cols,d[6]*sub_img.rows), cv::Scalar(255,255,0));
-                    my_width = d[5]* sub_img.cols - d[3]* sub_img.cols;
-                    my_height = d[6] * sub_img.rows - d[4] * sub_img.rows;
-
-                    x_avg =( d[3]* sub_img.cols + d[5] *sub_img.cols)/2;
-                    x_avg = x_avg + top_left_x; 
-                    y_avg =( d[4]* sub_img.rows + d[6] *sub_img.rows)/2;
-                    y_avg = y_avg + top_left_y;
-                    int baseline = 0;
-                    string text;
-                    int fontFace = cv::FONT_HERSHEY_PLAIN;
-                    double fontScale = 2;
-                    int thickness = 2;
-                    
-                    // TODO: Multi obeject detection handling
-                    // 1) Box object should be saved in an array 
-                    // 2) Multi-object tracking should be implemented
-
-                    //Person
-                    if (d[1] == 15){
-                        //if(count_person == 1)
-                        //  {
-                        //  logout << "Multiple person: detection failed\n" << std::endl;
-                        //  count_person++;
-                        //  break;
-                        //  }
-
-                        text = "person";
-                        cv::Size textSize = cv::getTextSize(text, fontFace,
-                                fontScale, thickness, &baseline);
-                        baseline += thickness;
-                        cv::Point textOrg(x_avg - textSize.width/2 ,y_avg - textSize.height/2);
-                        putText(img, text, textOrg, fontFace, fontScale,
-                                cv::Scalar::all(0), thickness, 8);
-
-                        rectangle(img, cv::Point(d[3]*sub_img.cols + top_left_x, d[4]*sub_img.rows + top_left_y), 
-                                cv::Point(d[5]*sub_img.cols + top_left_x, d[6]*sub_img.rows + top_left_y),
-                                cv::Scalar(255,0,0),2,8);
-
-                        logout << "bbox.x + bbox.width/2: " << bbox.x + bbox.width/2 << "crop (x_avg ): " << x_avg << std::endl;
-                        //to track the hightest score object 
-                        if(score > max_score){
-                            draw_bbox.x = d[3]*sub_img.cols + top_left_x;
-                            draw_bbox.y = d[4]*sub_img.rows + top_left_y;
-                            draw_bbox.height = my_height;
-                            draw_bbox.width = my_width;
-                            //if my_width or my_height is greater than 40, we resize it to 40 for fast tracking	i
-                            int max_width = 200;
-                            int max_height = 200;
-                            if(my_width > max_width){
-                                //	printf("exceed width !!!!!!!!!!!\n");
-                                reduce_width = my_width - max_width;
-                                reduce_x = (my_width - max_width)/2;
-                                bbox.x = d[3]*sub_img.cols + top_left_x + reduce_x;
-                                bbox.width = max_width;
-                            }
-                            else{
-                                reduce_width = 0;
-                                reduce_x = 0;
-                                bbox.x = d[3]*sub_img.cols + top_left_x;
-                                bbox.width = my_width;
-                            }
-                            if(my_height > max_height){
-                                //printf("exceed height !!!!!!!!!!\n");
-                                reduce_height = my_height - max_height;
-                                reduce_y = (my_height - max_height)/2;
-                                bbox.y = d[4]*sub_img.rows + top_left_y + reduce_y;
-                                bbox.height = max_height;
-                            }
-                            else{
-                                reduce_height = 0;
-                                reduce_y = 0;
-                                bbox.y = d[4]*sub_img.rows + top_left_y;
-                                bbox.height = my_height;
-                            }
-                               //bbox.x = d[3]*sub_img.cols + top_left_x;
-                               //bbox.y = d[4]*sub_img.rows + top_left_y;
-                               //bbox.height = my_height;
-                               //bbox.width = my_width; 
-                            max_score = score;
-                        }
-
-                        logout << "det_height: " << bbox << std::endl;
-                        testout << "det_height: " << bbox << std::endl;
-                        logout << "min_distance: " << min_distance << std::endl;
-                        testout << "min_distance: " << min_distance << std::endl;
-                        detect_success = true;
-                        count_person++;
-                    }
-                    //Car
-                    else if (d[1] == 7){
-#if NEW_VERSION 
-                        text = "car";
-                        cv::Size textSize = cv::getTextSize(text, fontFace,
-                                fontScale, thickness, &baseline);
-                        baseline += thickness;
-                        cv::Point textOrg(x_avg - textSize.width/2 ,y_avg - textSize.height/2);
-                        putText(img, text, textOrg, fontFace, fontScale,
-                                cv::Scalar::all(0), thickness, 8);
-
-                        rectangle(img, cv::Point(d[3]*sub_img.cols + top_left_x, d[4]*sub_img.rows + top_left_y), 
-                                cv::Point(d[5]*sub_img.cols + top_left_x, d[6]*sub_img.rows + top_left_y),
-                                cv::Scalar(255,0,0),2,8);
-                        float cur_distance = sqrt((bbox.x + bbox.width/2 - (x_avg)) *(bbox.x + bbox.width/2 - (x_avg)) +
-                                (bbox.y + bbox.height/2 - (y_avg)) *(bbox.y + bbox.height/2 - (y_avg)));
-
-                        logout << "bbox.x + bbox.width/2 : " << bbox.x + bbox.width/2 << "crop (x_avg ): " << x_avg << std::endl; 
-
-                        if ( cur_distance < min_distance || min_distance == 0){
-                            min_distance = cur_distance;
-
-                            bbox.x = d[3]*sub_img.cols + top_left_x;
-                            bbox.y = d[4]*sub_img.rows + top_left_y;
-                            bbox.height = my_height;
-                            bbox.width = my_width;
-
-                        } 
-                           //bbox.height = my_height;
-                           //bbox.width = my_width;
-                           //bbox.x = d[3]*sub_img.cols + top_left_x;
-                           //bbox.y = d[4]*sub_img.rows + top_left_y;
-                        logout << bbox << std::endl;
-                        logout << "min_distance: " << min_distance << std::endl;
-                        detect_success = true;
-                        count_car++;
-#endif
-                    }
-                    logout << "count_car: " << count_car << std::endl;
-                }
-            }
-            //TODO : if minimum distance is larger than bbox, tracker use old box.
-            // do not update bbox
-
-            //std::cout << "minx" << bbox.x + bbox.width/2 << "miny" << bbox.y + bbox.height/2 << std::endl;
-            //containPoint(bbox, bbox.x + bbox.width/2, bbox.y + bbox.height/2)
-            //if (detect_success && min_distance < std::max(bbox.width, bbox.height) * 1)
-            if(detect_success)
-            {
-
-                Json::Value data_json;
-
-                //Multi-object error
-                if(count_person > 1)
-                {
-                    pthread_mutex_lock(&track_mutex);
-                    is_detect_run = true;
-                    is_detect_thisframe = true;
-                    pthread_mutex_unlock(&track_mutex);
-
-                    data_json["data"]["status"] = "MULTI_OBJECTS";
-                    data_json["type"] = "imageresult";
-                    Json::StyledWriter writer;
-                    std::string str = writer.write(data_json);
-
-                    if(send(clnt_sock, str.data(), str.size(), 0) < 0)
-                    {
-                        perror("tracker sends error");
-                        continue;
-                    }
-                    //for debugging 	
-                    bbox.height = bbox.height;
-                    bbox.width = bbox.width;
-                    bbox.x = bbox.x;
-                    bbox.y = bbox.y;
-
-                    tracker->clear();
-                    tracker = cv::Tracker::create(TRACKING_METHOD);
-                    tracker->init(img,bbox);
-
-                }
-                //Single-object detection
-                else
-                {
-                    bbox.height = bbox.height;
-                    bbox.width = bbox.width;
-                    bbox.x = bbox.x;
-                    bbox.y = bbox.y;
-                    tracker->clear();
-                    tracker = cv::Tracker::create(TRACKING_METHOD);
-                    tracker->init(img,bbox);
-
-                }
-                testout << "in dectect_success loop (bbox)" << bbox << std::endl;
-
-            }   
-            //Detection fail error
-            else
-            {
-                pthread_mutex_lock(&track_mutex);
-                is_detect_run = true;
-                is_detect_thisframe = true;
-                is_first_detect = true;
-                pthread_mutex_unlock(&track_mutex);
-
-                Json::Value data_json;
-                data_json["data"]["status"] = "NO_OBJECTS";
-                data_json["type"] = "imageresult";
-                Json::StyledWriter writer;
-                std::string str = writer.write(data_json);
-
-                if(send(clnt_sock, str.data(), str.size(), 0) < 0)
-                {
-                    perror("tracker sends error");
-                    continue;
-                }
-
-                logout << "detection fail" << std::endl;
-            }
-            if(count_person > 1){
-                pthread_mutex_lock(&track_mutex);
-                is_detect_thisframe = true;
-                pthread_mutex_unlock(&track_mutex);
-            }
-            else{
-                pthread_mutex_lock(&track_mutex);
-                is_detect_thisframe = false;
-                pthread_mutex_unlock(&track_mutex);
-            }
-            count_car = 0;
-            count_person = 0;
-            max_score = 0;
-
-        }
-        //Handle tracking 
-        else{
-            tracker -> update(img, bbox); 
-
-            //update draw box information 
-
-            draw_bbox.x = bbox.x - reduce_x;
-
-            draw_bbox.y = bbox.y - reduce_y;
-            draw_bbox.width = bbox.width +reduce_width;
-            draw_bbox.height = bbox.height + reduce_height;
-            if(draw_bbox.x <=0){
-                draw_bbox.x = 0;
-            }
-            if(draw_bbox.y <=0){
-                draw_bbox.y = 0;
-            }
-            testout << "draw_bbox " << draw_bbox <<endl;	
-
-            rectangle(img,draw_bbox, cv::Scalar(255,0,0),2,1);
-            rectangle(img, bbox, cv::Scalar(255,0,0),2,1);
-
-
-            logout << bbox << std::endl;
-
-            if(!send_track_result)
-            {
-                send_track_result = true;
-                send_track_timer = clock();
-            }
-            else
-            {
-                double time_elapsed = (clock() - send_track_timer) / CLOCKS_PER_SEC;
-                if(time_elapsed >= send_track_period)
-                {
-                    Json::Value data_json;
-                    data_json["type"] = "imageresult";
-                    data_json["data"]["status"] = "SUCCESS";
-                    data_json["data"]["x_min"] = bbox.x;
-                    data_json["data"]["y_min"] = bbox.y;
-                    data_json["data"]["width"] = bbox.width;
-                    data_json["data"]["height"] = bbox.height;
-                    data_json["data"]["time"] = time_elapsed; 
-                    data_json["data"]["v_width"] = frame_width;
-                    data_json["data"]["v_height"] = frame_height;
-
-                    Json::StyledWriter writer;
-                    std::string str = writer.write(data_json);
-
-                    if(send(clnt_sock, str.data(), str.size(), 0) < 0)
-                    {
-                        perror("tracker sends error");
-                        continue;
-                    }
-
-                    send_track_result = false;
-                }
-            }
-        }
-        time_diff = (double) (clock() -before_read_img) /CLOCKS_PER_SEC;
-
-        char frame_text[200];
-        int frame_fontFace = cv::FONT_HERSHEY_PLAIN;
-        double frame_fontScale = 2;
-        int frame_thickness = 2;
-        int frame_baseline = 0;
-        sprintf(frame_text,"%lf",(1/time_diff));
-        testout << "frames : "<< frame_text << endl;
-        cv::Size frame_textSize = cv::getTextSize(frame_text, frame_fontFace,
-                frame_fontScale, frame_thickness, &frame_baseline);
-        frame_baseline += frame_thickness;
-        cv::Point frame_textOrg(100 - frame_textSize.width/2 ,100 - frame_textSize.height/2);
-        putText(img, frame_text, frame_textOrg, frame_fontFace, frame_fontScale,
-                cv::Scalar(128,128,128), frame_thickness, 8);
-        cv::imshow("test",img);
-        cv::waitKey(30);   
-        ++frame_count;
-
-        //Stream boxed image (result of tracking or detectiion
-        if(is_stream && GCS_STREAM)
-        {
-            cv::Mat img_str;
-            cv::resize(img,img_str,cv::Size(640,480));
-            writer << img_str;
-        }
-        //    pthread_mutex_unlock(&track_mutex);
-    }
-    */
 }
 
 void *network_handler(void *arg)
