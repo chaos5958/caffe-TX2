@@ -72,9 +72,9 @@ int clnt_sock;
 
 //for debugging and logging
 #define USE_STREAM 1
-#define GCS_STREAM 1
+#define GCS_STREAM 1 
 #define NORM_LOG_ENABLED 0
-#define TEST_LOG_ENABLED 0
+#define TEST_LOG_ENABLED 0 
 
 typedef std::ostream& (*manip) (std::ostream&);
 struct normlogger
@@ -131,6 +131,7 @@ pthread_mutex_t track_mutex = PTHREAD_MUTEX_INITIALIZER;
 //Variables shared between threads
 bool is_detect_run = false;
 bool is_detect_thisframe = false;
+bool is_first_detect = true;
 bool is_stream = false;
 bool is_quit = false;
 int index_obj = 0;
@@ -408,6 +409,9 @@ int main(int argc, char** argv) {
     const char *port = LISTEN_PORT;
     int read_len = 0; 
     int write_len = 0;
+    int yes;
+    yes = 1;
+    
     // client handler thread creation. thread will take a task in working queue.    
     serv_sock = socket (PF_INET, SOCK_STREAM, 0);
     
@@ -416,6 +420,10 @@ int main(int argc, char** argv) {
     serv_adr.sin_family= AF_INET;
     serv_adr.sin_addr.s_addr = htonl(INADDR_ANY);
     serv_adr.sin_port = htons(atoi(port));
+
+    setsockopt(serv_sock, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int));
+    setsockopt(serv_sock, SOL_SOCKET, SO_REUSEPORT, &yes, sizeof(int));
+
     
     if(bind(serv_sock, (struct sockaddr *) &serv_adr, sizeof(serv_adr)) == -1)
     {
@@ -519,8 +527,8 @@ void *detection_handler(void *arg)
     
     if(GCS_STREAM)
     {
-      //writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=143.248.53.74 port=5000", 0, (double)30, cv::Size(640, 480), true); 
-        writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=223.171.33.71 port=5000", 0, (double)30, cv::Size(640, 480), true); 
+        printf("point1\n");
+        writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=223.171.33.71 port=5003 ", 0, (double)30, cv::Size(640, 480), true); 
 
         if (!writer.isOpened()) {
             printf("=ERR= can't create video writer\n");
@@ -553,7 +561,7 @@ void *detection_handler(void *arg)
         }
         cv::Mat img, sub_img;
         bool success = cap.read(img);
-        bool is_first_detect = true;
+        //bool is_first_detect = true;
         bool detect_success = false;
 	    bool send_track_result= false;
         tracker->init(img, bbox);
@@ -588,13 +596,27 @@ void *detection_handler(void *arg)
             CHECK(!img.empty()) << "Error when read frame";
 
             // detect objects 30 frames
-            if (frame_count % 30 == 0 || is_detect_thisframe){
+            if (frame_count % 30 == 0 || is_detect_thisframe || is_first_detect){
                 //Crop image using prior tracking result
 
                 detect_success = false;
-
+                /* // debugging code 
+                if(is_first_detect == true ){
+                    printf("is first detect true\n");
+                }
+                else{
+                    printf("is first detect false\n");
+                }
+                if(is_detect_thisframe == true){
+                    printf("is detect thisframe true\n");
+                }
+                else{
+                    printf("is detect thisframe false\n");
+                }
+*/
                 if(!is_first_detect || is_detect_thisframe)
                 {
+ //                   printf("\x1b[42m normal detect \x1b[0m\n");
                     logout << "image row: " << img.rows << " image col: " << img.cols << std::endl;
                     //top_left_x = std::max(static_cast<int>(bbox.x - bbox.width* CROP_RATIO), 0); 
                     //top_left_x = std::min(top_left_x, img.cols);
@@ -992,8 +1014,10 @@ void *detection_handler(void *arg)
             ++frame_count;
 
             //Stream boxed image (result of tracking or detectiion
+            
             if(is_stream && GCS_STREAM)
             {
+                printf("point2\n");
                 cv::Mat img_str;
                 cv::resize(img,img_str,cv::Size(640,480));
                 writer << img_str;
@@ -1143,9 +1167,11 @@ void *network_handler(void *arg)
         //Detect on a whole image
         else if(cmd.asString().compare("redetect") == 0)
         {
+            //printf("redetect come \n");
             pthread_mutex_lock(&track_mutex);
+            is_first_detect = true;
             is_detect_run = true;
-            is_detect_thisframe = true; 
+            is_detect_thisframe = false; 
             pthread_mutex_unlock(&track_mutex);
             pthread_cond_signal(&track_cond);
 

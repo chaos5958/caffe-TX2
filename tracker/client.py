@@ -92,7 +92,7 @@ try:
             elif keyboard_input.startswith('streamstart'):
                 command_state = 3
                 break
-	    elif keyboard_input.startswith('steamstop'):
+	    elif keyboard_input.startswith('streamstop'):
                 command_state = 4
                 break
             elif keyboard_input.startswith('redetect'):
