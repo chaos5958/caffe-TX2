@@ -71,7 +71,6 @@ using namespace std;
 //for networking
 #define BUF_SIZE 4096 
 #define LISTEN_PORT "44444"
-int clnt_sock;
 
 //for debugging and logging
 #define USE_STREAM 0
@@ -79,6 +78,63 @@ int clnt_sock;
 #define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
 #define USE_TrackerKCF 1
+#define NETWORK_DEBUG 0 
+//for developing
+
+//#define COMMAND_BUF_SIZE 128
+sem_t mutex;
+sem_t empty;
+sem_t full;
+pthread_cond_t track_cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t track_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+//Variables shared between threads
+bool is_detect_run = false;
+bool is_detect_thisframe = false;
+bool is_stream = false;
+bool is_quit = false;
+
+int frame_width = 1280;
+int frame_height = 720;
+int frame_rate = 10;
+int buffer_size = 1; 
+
+int send_msg_per_frame = 1; // send tracking result per XXX frame, 1 is default sending every frame's result
+
+bool initial_crop_enable = false;
+bool detection_crop_enable = false;
+bool tracking_crop_enable = true;
+bool visualize_detection_enable = true;
+bool visualize_tracking_enable = true;
+
+int track_frame_num = 30;
+int object_type = 15; 
+int selection_policy = 1;
+int color_confidence_ratio = 0.05;
+
+int iLowH = 0;
+int iHighH = 35;
+int iLowS = 100;
+int iHighS = 255;
+int iLowV = 100;
+int iHighV = 255;
+
+int clnt_sock;
+
+#define CAR 0
+#define HUMAN 1
+
+
+int port_num;
+
+void error_handling(char * buf);
+void * network_handler(void * arg);
+void test_json();
+void *detection_handler(void *arg);
+int write_log(const char *foramat, ...);
+bool send_imageresult(Json::Value msg);
+
+char command_buf[BUF_SIZE];
 
 typedef std::ostream& (*manip) (std::ostream&);
 struct normlogger
@@ -117,67 +173,8 @@ struct testlogger
     }
 };
 
-
-#define NETWORK_DEBUG 0 
 static normlogger logout = normlogger(); 
 static testlogger testout = testlogger();
-
-//for developing
-#define NEW_VERSION 0
-
-//#define COMMAND_BUF_SIZE 128
-sem_t mutex;
-sem_t empty;
-sem_t full;
-pthread_cond_t track_cond = PTHREAD_COND_INITIALIZER;
-pthread_mutex_t track_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-//Variables shared between threads
-bool is_detect_run = false;
-bool is_detect_thisframe = false;
-bool is_stream = false;
-bool is_quit = false;
-int index_obj = 0;
-int object = 0; //NOT USED YET VER.1.0
-double send_track_period = 0;
-int frame_width = 1280;
-int frame_height = 720;
-int frame_rate = 10;
-int buffer_size = 1; 
-int send_msg_per_frame = 1; // send tracking result per XXX frame, 1 is default sending every frame's result
-
-bool initial_crop_enable = false;
-bool detection_crop_enable = false;
-bool tracking_crop_enable = true;
-bool visualize_detection_enable = true;
-bool visualize_tracking_enable = true;
-
-int track_frame_num = 30;
-int object_type = 15; 
-int selection_policy = 1;
-int color_confidence_ratio = 0.05;
-
-int iLowH = 0;
-int iHighH = 35;
-int iLowS = 100;
-int iHighS = 255;
-int iLowV = 100;
-int iHighV = 255;
-
-#define CAR 0
-#define HUMAN 1
-
-
-int port_num;
-
-void error_handling(char * buf);
-void * network_handler(void * arg);
-void test_json();
-void *detection_handler(void *arg);
-int write_log(const char *foramat, ...);
-bool send_imageresult(Json::Value msg);
-
-char command_buf[BUF_SIZE];
 
 class Detector {
     public:
@@ -433,8 +430,6 @@ int main(int argc, char** argv) {
     struct sockaddr_in serv_adr, clnt_adr;
     socklen_t clnt_adr_sz;
     const char *port = LISTEN_PORT;
-    int read_len = 0; 
-    int write_len = 0;
     // client handler thread creation. thread will take a task in working queue.    
     serv_sock = socket (PF_INET, SOCK_STREAM, 0);
 
@@ -493,8 +488,6 @@ void *detection_handler(void *arg)
     const string& weights_file = input_args->operator[](1);
     const string& mean_file = FLAGS_mean_file;
     const string& mean_value = FLAGS_mean_value;
-    const string& file_type = FLAGS_file_type;
-    const string& out_file = FLAGS_out_file;
     const float confidence_threshold = FLAGS_confidence_threshold;
 
     Detector detector(model_file, weights_file, mean_file, mean_value);
@@ -983,6 +976,7 @@ void *network_handler(void *arg)
                     std::cerr << "[Track] Json format is wrong :" << buf << std::endl;
                 }
 
+                /*
                 //Get the object value from json
                 tmp_str = object_json.asString();
                 if(tmp_str.compare("car"))
@@ -998,9 +992,7 @@ void *network_handler(void *arg)
                     std::cerr << "Object is invalid: " << buf << std::endl;
                     continue;
                 }
-
-                //Get the index value from json 
-                index_obj = atoi(index_json.asString().c_str());
+                */
 
                 pthread_mutex_lock(&track_mutex);
                 is_detect_run = true;
@@ -1099,7 +1091,6 @@ void *network_handler(void *arg)
             Json::Value interval_json= data["data"]["interval"];
             int input_period = atoi(interval_json.asString().c_str());
             pthread_mutex_lock(&track_mutex);
-            send_track_period = input_period;
             pthread_mutex_unlock(&track_mutex);
             testout << "track_preriod: " << input_period << std::endl;
 
