@@ -73,7 +73,7 @@ using namespace std;
 #define LISTEN_PORT "44444"
 
 //for debugging and logging
-#define USE_STREAM 1
+#define USE_STREAM 0
 #define GCS_STREAM 0 
 #define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
@@ -496,13 +496,13 @@ void *detection_handler(void *arg)
     //initialization input video & GCS stream 
     std::string file; //TODO: is this variable necceary?
     cv::VideoCapture cap;
-    cv::VideoWriter writer;
+    cv::VideoWriter gcs_writer;
 
     if(GCS_STREAM)
     {
-        writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=223.171.33.71 port=5000", 0, (double)30, cv::Size(640, 480), true); 
+        gcs_writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=223.171.33.71 port=5000", 0, (double)30, cv::Size(640, 480), true); 
 
-        if (!writer.isOpened()) {
+        if (!gcs_writer.isOpened()) {
             printf("=ERR= can't create video writer\n");
             return NULL;
         }
@@ -951,6 +951,14 @@ void *detection_handler(void *arg)
             else{
                 rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
             }
+
+            if(GCS_STREAM)
+            {
+                cv::Mat img_stream;
+                cv::resize(img, img_stream, cv::Size(640, 480));
+                gcs_writer << img_stream;
+            }
+
             //visualize tracking
             if(visualize_tracking_enable)
             { 
