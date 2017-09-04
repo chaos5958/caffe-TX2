@@ -645,9 +645,10 @@ void *detection_handler(void *arg)
             img_process = img(cv::Rect(top_left_x, top_left_y, crop_box_width, crop_box_height));
 			//for debugging
 			
+            cv::Rect2d debug_bbox(top_left_x, top_left_y, crop_box_width, crop_box_height);
 			if(visualize_detection_enable){
-				cv::Rect2d debug_bbox(top_left_x, top_left_y, crop_box_width, crop_box_height);
-				rectangle(img, debug_bbox, cv::Scalar(128,128,0), 2, 1);
+			    //for debugging 
+                //rectangle(img, debug_bbox, cv::Scalar(128,128,0), 2, 1);
 				cv::imshow("output", img);
 				cv::waitKey(30); 
 			}
@@ -864,10 +865,10 @@ void *detection_handler(void *arg)
             }
         }
 
+        rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
         //visualize detection
         if(visualize_detection_enable)
         {
-            rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
             cv::imshow("output", img);
             cv::waitKey(30);   
         }
@@ -926,33 +927,32 @@ void *detection_handler(void *arg)
                 start_time = clock();
             }
 
+            
+            if(tracking_crop_enable){
+                //draw_bbox update
+                draw_bbox.x = bbox.x - reduce_x;
+                draw_bbox.y = bbox.y - reduce_y;
+                draw_bbox.width = bbox.width +reduce_width;
+                draw_bbox.height = bbox.height + reduce_height;
+
+                if(draw_bbox.x <=0){
+                    draw_bbox.x = 0;
+                }
+                if(draw_bbox.y <=0){
+                    draw_bbox.y = 0;
+                }
+
+                rectangle(img, draw_bbox, cv::Scalar(255,0,0), 2, 1);
+                //rectangle(img, bbox, cv::Scalar(255,255,0), 2, 1);
+            }
+            else{
+                rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
+            }
             //visualize tracking
             if(visualize_tracking_enable)
-            {
-                if(tracking_crop_enable){
-                    //draw_bbox update
-                    draw_bbox.x = bbox.x - reduce_x;
-                    draw_bbox.y = bbox.y - reduce_y;
-                    draw_bbox.width = bbox.width +reduce_width;
-                    draw_bbox.height = bbox.height + reduce_height;
-
-                    if(draw_bbox.x <=0){
-                        draw_bbox.x = 0;
-                    }
-                    if(draw_bbox.y <=0){
-                        draw_bbox.y = 0;
-                    }
-
-                    rectangle(img, draw_bbox, cv::Scalar(255,0,0), 2, 1);
-                    //rectangle(img, bbox, cv::Scalar(255,255,0), 2, 1);
-                    cv::imshow("output", img);
-                    cv::waitKey(30);   
-                }
-                else{
-                    rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
-                    cv::imshow("output", img);
-                    cv::waitKey(30);   
-                }
+            { 
+                cv::imshow("output", img);
+                cv::waitKey(30);   
             }
         }
         tracker->clear();
