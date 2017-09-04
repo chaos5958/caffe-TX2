@@ -77,7 +77,7 @@ using namespace std;
 #define GCS_STREAM 0 
 #define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
-#define USE_TrackerKCF 1
+#define USE_TrackerKCF 0
 
 #define NETWORK_DEBUG 0 
 //for developing
@@ -559,6 +559,7 @@ void *detection_handler(void *arg)
         
         img_process = img;
 
+
         //preprocess
         if(initial_crop_enable)
         {
@@ -577,16 +578,24 @@ void *detection_handler(void *arg)
             //img(cv::Rect(280,0,720,720));
             img_process = img(cv::Rect(top_left_x,top_left_y, img.rows,img.rows));
             initial_crop_enable = false;
-			
+		
+			//for debugging
+			/*
 			cv::Rect2d debug_bbox(top_left_x, top_left_y, crop_box_width, crop_box_height);
             rectangle(img, debug_bbox, cv::Scalar(100,100,0), 2, 1);
 			cv::imshow("output", img);
 	        cv::waitKey(30); 
+			*/
 
 
         }
         else if(detection_crop_enable)
         {
+			if(is_redetect){
+				initial_crop_enable = true;
+				is_redetect = false;
+				continue;
+			}
             if(tracking_crop_enable){
                 top_left_x = std::max(static_cast<int>(draw_bbox.x - draw_bbox.width* CROP_RATIO), 0);
                 top_left_y = std::max(static_cast<int>(draw_bbox.y - draw_bbox.height* CROP_RATIO), 0);
@@ -635,11 +644,13 @@ void *detection_handler(void *arg)
             }
             img_process = img(cv::Rect(top_left_x, top_left_y, crop_box_width, crop_box_height));
 			//for debugging
-			cv::Rect2d debug_bbox(top_left_x, top_left_y, crop_box_width, crop_box_height);
-            rectangle(img, debug_bbox, cv::Scalar(128,128,0), 2, 1);
-			cv::imshow("output", img);
-	        cv::waitKey(30); 
-
+			
+			if(visualize_detection_enable){
+				cv::Rect2d debug_bbox(top_left_x, top_left_y, crop_box_width, crop_box_height);
+				rectangle(img, debug_bbox, cv::Scalar(128,128,0), 2, 1);
+				cv::imshow("output", img);
+				cv::waitKey(30); 
+			}
 			
         }
         else
@@ -883,6 +894,7 @@ void *detection_handler(void *arg)
             {
                 initial_crop_enable = true;
                 detection_crop_enable = true;
+				is_redetect = false;
                 break;
             }
 
@@ -931,8 +943,8 @@ void *detection_handler(void *arg)
                         draw_bbox.y = 0;
                     }
 
-                    rectangle(img, draw_bbox, cv::Scalar(255,255,0), 2, 1);
-                    rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
+                    rectangle(img, draw_bbox, cv::Scalar(255,0,0), 2, 1);
+                    //rectangle(img, bbox, cv::Scalar(255,255,0), 2, 1);
                     cv::imshow("output", img);
                     cv::waitKey(30);   
                 }
@@ -1037,7 +1049,7 @@ void *network_handler(void *arg)
 
                 pthread_mutex_lock(&track_mutex);
                 is_detect_run = true;
-                is_redetect = true; 
+                is_redetect = false; 
                 pthread_mutex_unlock(&track_mutex);
                 pthread_cond_signal(&track_cond);
             }
