@@ -71,7 +71,7 @@ using namespace std;
 int clnt_sock;
 
 //for debugging and logging
-#define USE_STREAM 1
+#define USE_STREAM 0
 #define GCS_STREAM 0 
 #define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
@@ -141,6 +141,7 @@ int frame_width = 1280;
 int frame_height = 720;
 int frame_rate = 10;
 int buffer_size = 1; 
+int send_msg_per_frame = 1; // send tracking result per XXX frame, 1 is default sending every frame's result
 
 bool initial_crop_enable = false;
 
@@ -172,6 +173,7 @@ void * network_handler(void * arg);
 void test_json();
 void *detection_handler(void *arg);
 int write_log(const char *foramat, ...);
+bool send_imageresult(Json::Value msg);
 
 char command_buf[BUF_SIZE];
 
@@ -586,6 +588,13 @@ void *detection_handler(void *arg)
         //detection: fail
         if(targets.size() == 0)
         {
+            Json::Value msg;
+
+            msg["data"]["status"] = "NO OBJECTS";
+            msg["type"] = "imageresult";
+            
+            send_imageresult(msg);
+
             continue;
         }
         //detection: multiple objects
@@ -628,6 +637,11 @@ void *detection_handler(void *arg)
                     //error - no objects 
                     if(max_index == -1)
                     {
+                        Json::Value msg;
+                        msg["data"]["status"] = "MULTIPLE OBJECTS NO TARGET";
+                        msg["type"] = "imageresult";
+                        send_imageresult(msg);
+
                         std::cerr << "multiple objects: no targets" << std::endl
                             << "max_score: " << max_value << std::endl;   
                         continue;
@@ -654,9 +668,10 @@ void *detection_handler(void *arg)
         //detection: single object
         else
         {
+            d = targets[0];
         }
 
-        continue;
+        //continue;
 
         cv::Rect2d bbox;
         cv::Rect2d draw_bbox;
@@ -742,15 +757,17 @@ void *detection_handler(void *arg)
         cv::Ptr<cv::Tracker> tracker = cv::Tracker::create("KCF");
 #endif
         std::cout << bbox << std::endl;
-        bbox.x = 100;
-        bbox.y = 100;
-        bbox.width = 100;
-        bbox.height = 100;
         tracker->init(img, bbox);
 
         //tracking
+        double start_time = clock();
+        double elapsed_time;
+
         for(int i = 0; i < track_frame_num; i++)
         {
+            if(is_quit)
+                break;
+
             bool success = cap.read(img);
             if(!success)
             {
@@ -758,6 +775,26 @@ void *detection_handler(void *arg)
                 break;
             }
             tracker->update(img, bbox);
+
+            if(i % send_msg_per_frame == 0)
+            {
+                elapsed_time = (clock() - start_time) / CLOCKS_PER_SEC;
+                
+                Json::Value msg;
+                msg["type"] = "imageresult";
+                msg["data"]["status"] = "SUCCESS";
+                msg["data"]["x_min"] = bbox.x;
+                msg["data"]["y_min"] = bbox.y;
+                msg["data"]["width"] = bbox.width;
+                msg["data"]["height"] = bbox.height;
+                msg["data"]["time"] = elapsed_time; 
+                msg["data"]["v_width"] = frame_width;
+                msg["data"]["v_height"] = frame_height;
+
+                send_imageresult(msg);
+
+                start_time = clock();
+            }
 
             //visualize tracking
             if(visualize_tracking_enable)
@@ -1431,6 +1468,20 @@ void *network_handler(void *arg)
         testout << "cmd: " << cmd.asString() << std::endl;
     }
     return NULL;
+}
+
+bool send_imageresult(Json::Value msg)
+{
+    Json::StyledWriter writer;
+    std::string str = writer.write(msg);
+
+    if(send(clnt_sock, str.data(), str.size(), 0) < 0)
+    {
+        perror("imagemresult: send error");
+        return false;
+    }
+
+    return true;
 }
 
 void error_handling(char * buf){

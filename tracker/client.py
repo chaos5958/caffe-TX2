@@ -56,9 +56,9 @@ def parse_json(data):
     #pprint(input)
     #print "status", input['cmd'], "data", input['target']['index']
 
-    if input['status'].startswith("MULTI_OBJECTS"):
+    if input['status'].startswith("MULTIPLE OBJECTS NO TARGET"):
         print "MULTI"
-    elif input['status'].startswith("NO_OBJECTS"):
+    elif input['status'].startswith("NO OBJECTS"):
         print "NO_OBJ"
     elif input['status'].startswith("SUCCESS"):
         x_min  = input['data']['x_min']
