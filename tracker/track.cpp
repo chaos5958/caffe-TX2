@@ -73,11 +73,51 @@ using namespace std;
 #define LISTEN_PORT "44444"
 
 //for debugging and logging
-#define USE_STREAM 0
+#define USE_STREAM 1
 #define GCS_STREAM 0 
 #define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
 #define USE_TrackerKCF 1
+
+typedef std::ostream& (*manip) (std::ostream&);
+struct normlogger
+{
+    template< typename T >
+        normlogger &operator<<(const T &val)
+        {
+            if(NORM_LOG_ENABLED)
+                std::cout<<val;
+            return *this;
+        }
+
+    normlogger &operator<<(manip manipulator)
+    {
+        if(NORM_LOG_ENABLED)
+            std::cout<<manipulator;
+        return *this;
+    }
+};
+
+struct testlogger
+{
+    template< typename T >
+        testlogger &operator<<(const T &val)
+        {
+            if(TEST_LOG_ENABLED)
+                std::cout<<val;
+            return *this;
+        }
+
+    testlogger &operator<<(manip manipulator)
+    {
+        if(TEST_LOG_ENABLED)
+            std::cout<<manipulator;
+        return *this;
+    }
+};
+
+
+>>>>>>> b72994f58edd7df119eccd657dabbb8eeaf6844a
 #define NETWORK_DEBUG 0 
 //for developing
 
@@ -101,8 +141,8 @@ int buffer_size = 1;
 
 int send_msg_per_frame = 1; // send tracking result per XXX frame, 1 is default sending every frame's result
 
-bool initial_crop_enable = false;
-bool detection_crop_enable = false;
+bool initial_crop_enable = true;
+bool detection_crop_enable = true;
 bool tracking_crop_enable = true;
 bool visualize_detection_enable = true;
 bool visualize_tracking_enable = true;
@@ -510,7 +550,7 @@ void *detection_handler(void *arg)
     if(!USE_STREAM)
         cap = cv::VideoCapture((input_args->operator[](2)));
     else{
-        cap = cv::VideoCapture(0);
+        cap = cv::VideoCapture(1);
         cap.set(CV_CAP_PROP_FRAME_WIDTH, frame_width);	
         cap.set(CV_CAP_PROP_FRAME_HEIGHT, frame_height);
         cap.set(CV_CAP_PROP_FPS, frame_rate);
@@ -524,10 +564,10 @@ void *detection_handler(void *arg)
     //initialization window 
     cv::namedWindow("output", 1);
 
-    int top_left_x;
-    int top_left_y;
-    int crop_box_width;
-    int crop_box_height;
+    int top_left_x = 0;
+    int top_left_y = 0;
+    int crop_box_width = 0;
+    int crop_box_height = 0;
 
     cv::Rect2d bbox;
     cv::Rect2d draw_bbox;
@@ -576,20 +616,27 @@ void *detection_handler(void *arg)
             //img(cv::Rect(280,0,720,720));
             img_process = img(cv::Rect(top_left_x,top_left_y, img.rows,img.rows));
             initial_crop_enable = false;
+			
+			cv::Rect2d debug_bbox(top_left_x, top_left_y, crop_box_width, crop_box_height);
+            rectangle(img, debug_bbox, cv::Scalar(100,100,0), 2, 1);
+			cv::imshow("output", img);
+	        cv::waitKey(30); 
+
+
         }
         else if(detection_crop_enable)
         {
             if(tracking_crop_enable){
                 top_left_x = std::max(static_cast<int>(draw_bbox.x - draw_bbox.width* CROP_RATIO), 0);
                 top_left_y = std::max(static_cast<int>(draw_bbox.y - draw_bbox.height* CROP_RATIO), 0);
-                crop_box_width = std::min(static_cast<int>((draw_bbox.x - top_left_x) * 2 + draw_bbox.width), MIN_CROP_WIDTH);
-                crop_box_height = std::min(static_cast<int>((draw_bbox.y - top_left_y) * 2 + draw_bbox.height), MIN_CROP_HEIGHT);
+                crop_box_width = std::max(static_cast<int>((draw_bbox.x - top_left_x) * 2 + draw_bbox.width), MIN_CROP_WIDTH);
+                crop_box_height = std::max(static_cast<int>((draw_bbox.y - top_left_y) * 2 + draw_bbox.height), MIN_CROP_HEIGHT);
             }
             else{
                 top_left_x = std::max(static_cast<int>(bbox.x - bbox.width* CROP_RATIO), 0);
                 top_left_y = std::max(static_cast<int>(bbox.y - bbox.height* CROP_RATIO), 0);
-                crop_box_width = std::min(static_cast<int>((bbox.x - top_left_x) * 2 + bbox.width), MIN_CROP_WIDTH);
-                crop_box_height = std::min(static_cast<int>((bbox.y - top_left_y) * 2 + bbox.height), MIN_CROP_HEIGHT);   
+                crop_box_width = std::max(static_cast<int>((bbox.x - top_left_x) * 2 + bbox.width), MIN_CROP_WIDTH);
+                crop_box_height = std::max(static_cast<int>((bbox.y - top_left_y) * 2 + bbox.height), MIN_CROP_HEIGHT);   
             }
             //minimum cropped image size is caffe input size
             int max_crop_x;
@@ -626,6 +673,13 @@ void *detection_handler(void *arg)
                 top_left_y = 0;
             }
             img_process = img(cv::Rect(top_left_x, top_left_y, crop_box_width, crop_box_height));
+			//for debugging
+			cv::Rect2d debug_bbox(top_left_x, top_left_y, crop_box_width, crop_box_height);
+            rectangle(img, debug_bbox, cv::Scalar(128,128,0), 2, 1);
+			cv::imshow("output", img);
+	        cv::waitKey(30); 
+
+			
         }
         else
         {
@@ -654,8 +708,9 @@ void *detection_handler(void *arg)
             msg["type"] = "imageresult";
             
             send_imageresult(msg);
-
-            continue;
+		
+            
+			continue;
         }
         //detection: multiple objects
         else if(targets.size() > 1)
@@ -664,7 +719,8 @@ void *detection_handler(void *arg)
             switch(selection_policy)
             {
                 //neareset neighbor
-                case 0: 
+                case 0:
+					//for debugging 
                     break;
                 //color based detection
                 case 1:
@@ -674,10 +730,27 @@ void *detection_handler(void *arg)
                     for(int i = 0; i < targets.size(); i++)
                     {
                         cv::Mat roi_HSV, roi_thresholded;
-                        cv::Mat roi(img_process, cv::Rect(targets[i][3] * img_process.cols, targets[i][4] * img_process.rows, 
-                                (targets[i][5] - targets[i][3]) * img_process.cols,
-                                (targets[i][6] - targets[i][4]) * img_process.rows));
-                        cv::cvtColor(roi, roi_HSV, cv::COLOR_BGR2HSV);
+
+						int target_x, target_y, target_width, target_height;
+						target_x =  std::max(static_cast<int>(targets[i][3] * img_process.cols), 0);
+						target_y =  std::max(static_cast<int>(targets[i][4] * img_process.rows), 0);
+                        target_width = static_cast<int>((targets[i][5] - targets[i][3]) * img_process.cols);
+                        target_height = static_cast<int>((targets[i][6] - targets[i][4]) * img_process.rows);
+						if(target_x + target_width > img_process.cols ){
+							target_width = img_process.cols - target_x;
+						}
+						if(target_y + target_height > img_process.rows){
+							target_height = img_process.rows - target_y;
+						}
+						cv::Rect2d debug_bbox(target_x, target_y, target_width, target_height);
+						std::cout << "cols(x) " << img_process.cols << "rows(y) " << img_process.rows ;
+						std::cout << "debug bbox " << debug_bbox << std::endl;
+						
+						cv::Mat roi(img_process, debug_bbox);
+                        //cv::Mat roi(img_process, cv::Rect(targets[i][3] * img_process.cols, targets[i][4] * img_process.rows, 
+                        //        (targets[i][5] - targets[i][3]) * img_process.cols,
+                        //        (targets[i][6] - targets[i][4]) * img_process.rows));
+						cv::cvtColor(roi, roi_HSV, cv::COLOR_BGR2HSV);
                         cv::inRange(roi_HSV, cv::Scalar(iLowH, iLowS, iLowV), cv::Scalar(iHighH, iHighS, iHighV), roi_thresholded); 
                         int score_input = cv::sum(roi_thresholded)[0] / 255; 
                         double score = (double)score_input / (double)roi_thresholded.total();
