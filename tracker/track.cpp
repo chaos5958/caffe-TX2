@@ -646,12 +646,13 @@ void *detection_handler(void *arg)
 			//for debugging
 			
             cv::Rect2d debug_bbox(top_left_x, top_left_y, crop_box_width, crop_box_height);
-			if(visualize_detection_enable){
+			/*if(visualize_detection_enable){
 			    //for debugging 
                 //rectangle(img, debug_bbox, cv::Scalar(128,128,0), 2, 1);
 				cv::imshow("output", img);
 				cv::waitKey(30); 
 			}
+            */
 			
         }
         else
@@ -847,6 +848,7 @@ void *detection_handler(void *arg)
                 bbox.y = draw_bbox.y;
                 bbox.height = my_height;
             }
+            rectangle(img, draw_bbox, cv::Scalar(255,0,0), 2, 1);
 
         }
         else
@@ -863,9 +865,10 @@ void *detection_handler(void *arg)
                 bbox.x = static_cast<int> (d[3]* img_process.cols);  
                 bbox.y = static_cast<int> (d[4]* img_process.rows);    
             }
+
+            rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
         }
 
-        rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
         //visualize detection
         if(visualize_detection_enable)
         {
