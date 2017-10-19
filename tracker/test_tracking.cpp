@@ -13,10 +13,11 @@
 using namespace std;
 using namespace cv;
 
-int total_frame_num = 500;
+int total_frame_num = 230;
 int total_process_num = 1;
 int total_task_num = 1;
 int box_length = 100;
+int percent = 100;
 
 int main( int argc, char** argv ){
 	//TODO: total_frame_num , total_process_num input args
@@ -33,7 +34,7 @@ int main( int argc, char** argv ){
 
 	if(argc == 3)
 	{
-		box_length = atoi(argv[2]);
+		percent = atoi(argv[2]);
 	}
 
 	// declares all required variables
@@ -52,7 +53,20 @@ int main( int argc, char** argv ){
 	//		return 0;
 	// initialize the tracker
 
-	cv::Rect2d roi = cv::Rect2d(100, 100, box_length, box_length);
+	double x = 575;
+    double y = 226;
+	double width = 51;
+	double height = 178;
+
+	x = (int) (x + (100-percent) * width /100/2);
+	y = (int) (y + (100-percent) * height/ 100/2);
+	width = (int) (percent*width / 100);
+	height =(int)( percent*height/100);
+
+
+	//printf("roi : x : %f y: %f width : %f height :%f \n",x, y, width, height);
+	cv::Rect2d roi = cv::Rect2d(x, y, width, height);
+	cv::Rect2d ground_truth = cv::Rect2d(573, 265,65 , 181);
 	tracker->init(frame,roi);
 
 	list<Mat> frames = list<Mat>();
@@ -62,12 +76,37 @@ int main( int argc, char** argv ){
 	printf("total_process_num: %d\n", total_process_num);
 	printf("total_task_num: %d\n", total_task_num);
 	
+	cv::namedWindow("test",1);
 	//sequential process
 	for (int i = 0; i < total_frame_num ; i++)
 	{
 		cap >> frame;
-		frames.push_back(frame);
+		//frames.push_back(frame);
+		tracker->update(frame,roi);
+		//rectangle(frame,ground_truth, cv::Scalar(255,255,0),2,1);
+		rectangle(frame,roi, cv::Scalar(255,0,0),2,1);
+		//cv::imshow("test", frame);
+		//cv::waitKey(30);
+
 	}
+	//rectangle(frame,ground_truth, cv::Scalar(255,255,0),2,1);
+	//cv::imshow("test", frame);
+
+	printf("roi : x : %f y: %f width : %f height :%f \n",roi.x, roi.y, roi.width, roi.height);
+	printf("grt : x : %f y: %f width : %f height :%f \n",ground_truth.x, ground_truth.y, ground_truth.width, ground_truth.height);
+
+	double distance = 0;
+
+	double diff_x =  (ground_truth.x + ground_truth.width / 2) - (roi.x + roi.width/2);
+	double diff_y =  (ground_truth.y + ground_truth.height/2 ) - (roi.y + roi.heigth/2);
+
+	distance = diff_x * diff_x + diff_y+ diff_y;
+
+	//cv::waitKey(999999999999999);
+
+	
+
+
 	printf("data size: %d\n", frames.size());
 
 	printf("start tracking\n");
@@ -77,13 +116,16 @@ int main( int argc, char** argv ){
 
 	//start_time = clock();
 	gettimeofday(&t0, 0);
+	/*
 	for (int i = 0; i < total_process_num; i++)
 	{
 		for (list<Mat>::iterator iter = frames.begin() ; iter!=frames.end(); iter++){
 			tracker->update(*iter,roi);
+			
 		}
 	}
-	gettimeofday(&t1, 0);
+	*/
+		gettimeofday(&t1, 0);
 	elapsed_time = (t1.tv_sec - t0.tv_sec) + (double)(t1.tv_usec - t0.tv_usec) / (double)1000000;
 	fps = total_frame_num * total_process_num / elapsed_time;
 	printf("sequential process: %f sec, fps: %f, box_length: %d \n", elapsed_time, fps, box_length);
