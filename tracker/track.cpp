@@ -73,8 +73,8 @@ using namespace std;
 #define LISTEN_PORT "44444"
 
 //for debugging and logging
-#define USE_STREAM 0
-#define GCS_STREAM 0 
+#define USE_STREAM 1 // camera
+#define GCS_STREAM 0 // gcs-stream 
 #define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
 #define USE_TrackerKCF 0
