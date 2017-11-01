@@ -682,7 +682,20 @@ void *detection_handler(void *arg)
             msg["type"] = "imageresult";
             
             send_imageresult(msg);
-		
+            
+            //visualize detection
+            if(visualize_detection_enable)
+            {
+                cv::imshow("output", img);
+                cv::waitKey(30);   
+            }
+            
+            if(GCS_STREAM && is_stream)
+            {
+                cv::Mat img_stream;
+                cv::resize(img, img_stream, cv::Size(640, 480));
+                gcs_writer << img_stream;
+            }
             
 			continue;
         }
@@ -771,6 +784,19 @@ void *detection_handler(void *arg)
                     break;
             }
 
+            if(GCS_STREAM && is_stream)
+            {
+                cv::Mat img_stream;
+                cv::resize(img, img_stream, cv::Size(640, 480));
+                gcs_writer << img_stream;
+            }
+
+            if(GCS_STREAM && is_stream)
+            {
+                cv::Mat img_stream;
+                cv::resize(img, img_stream, cv::Size(640, 480));
+                gcs_writer << img_stream;
+            }
         }
         //detection: single object
         else
@@ -869,7 +895,7 @@ void *detection_handler(void *arg)
             rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
         }
         
-        if(GCS_STREAM)
+        if(GCS_STREAM && is_stream)
         {
             cv::Mat img_stream;
             cv::resize(img, img_stream, cv::Size(640, 480));
@@ -925,11 +951,12 @@ void *detection_handler(void *arg)
                 msg["data"]["status"] = "SUCCESS";
                 msg["data"]["x_min"] = bbox.x;
                 msg["data"]["y_min"] = bbox.y;
-                msg["data"]["width"] = bbox.width;
-                msg["data"]["height"] = bbox.height;
+                msg["data"]["t_width"] = bbox.width;
+                msg["data"]["t_height"] = bbox.height;
                 msg["data"]["time"] = elapsed_time; 
                 msg["data"]["v_width"] = frame_width;
                 msg["data"]["v_height"] = frame_height;
+		msg["data"]["size"] = bbox.width * bbox.height;
 
                 send_imageresult(msg);
 
@@ -958,7 +985,7 @@ void *detection_handler(void *arg)
                 rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
             }
 
-            if(GCS_STREAM)
+            if(GCS_STREAM && is_stream)
             {
                 cv::Mat img_stream;
                 cv::resize(img, img_stream, cv::Size(640, 480));
@@ -1004,7 +1031,7 @@ void *network_handler(void *arg)
         bool parsingRet = reader.parse(rcv, data);
         if (!parsingRet)
         {
-            std::cerr << "Failed to parse Json: "  << reader.getFormattedErrorMessages();
+	  std::cerr << "Failed to parse Json: "  << reader.getFormattedErrorMessages();
             continue;
         }
 
