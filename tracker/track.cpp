@@ -73,7 +73,7 @@ using namespace std;
 #define LISTEN_PORT "44444"
 
 //for debugging and logging
-#define USE_STREAM 1 // camera
+#define USE_STREAM 0 // camera
 #define GCS_STREAM 0 // gcs-stream 
 #define NORM_LOG_ENABLED 1
 #define TEST_LOG_ENABLED 1 
@@ -105,8 +105,8 @@ int send_msg_per_frame = 1; // send tracking result per XXX frame, 1 is default 
 bool initial_crop_enable = true;
 bool detection_crop_enable = true;
 bool tracking_crop_enable = true;
-bool visualize_detection_enable = true;
-bool visualize_tracking_enable = true;
+bool visualize_detection_enable = false;
+bool visualize_tracking_enable = false;
 
 int track_frame_num = 30;
 int object_type = 15; 
@@ -498,9 +498,15 @@ void *detection_handler(void *arg)
     cv::VideoCapture cap;
     cv::VideoWriter gcs_writer;
 
+    //time measure
+    struct timeval end_detect, start_detect;
+    struct timeval end_track, start_track;
+    double elapsed_time;
+
     if(GCS_STREAM)
     {
         gcs_writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=223.171.33.71 port=5000", 0, (double)30, cv::Size(640, 480), true); 
+        //gcs_writer.open("appsrc ! videoconvert ! x264enc tune=zerolatency ! rtph264pay ! udpsink host=127.0.0.1 port=5000", 0, (double)30, cv::Size(640, 480), true); 
 
         if (!gcs_writer.isOpened()) {
             printf("=ERR= can't create video writer\n");
@@ -535,6 +541,7 @@ void *detection_handler(void *arg)
 
     while(1)
     {
+        gettimeofday(&start_detect, 0);
         pthread_mutex_lock(&track_mutex);
         while(!is_detect_run && !is_quit)
             pthread_cond_wait(&track_cond, &track_mutex);  
@@ -790,13 +797,6 @@ void *detection_handler(void *arg)
                 cv::resize(img, img_stream, cv::Size(640, 480));
                 gcs_writer << img_stream;
             }
-
-            if(GCS_STREAM && is_stream)
-            {
-                cv::Mat img_stream;
-                cv::resize(img, img_stream, cv::Size(640, 480));
-                gcs_writer << img_stream;
-            }
         }
         //detection: single object
         else
@@ -879,7 +879,7 @@ void *detection_handler(void *arg)
         }
         else
         {
-            if (initial_crop_enable ||detection_crop_enable){
+            if (initial_crop_enable || detection_crop_enable){
                 bbox.width = static_cast<int> (d[5] * img_process.cols - d[3] * img_process.cols);
                 bbox.height = static_cast<int> (d[6] * img_process.rows - d[4] * img_process.rows);
                 bbox.x = static_cast<int> (d[3]* img_process.cols + top_left_x);  
@@ -894,6 +894,22 @@ void *detection_handler(void *arg)
 
             rectangle(img, bbox, cv::Scalar(255,0,0), 2, 1);
         }
+
+        gettimeofday(&end_detect, 0);
+        elapsed_time = (end_detect.tv_sec - start_detect.tv_sec) + (double)(end_detect.tv_usec - start_detect.tv_usec) / (double)1000000;
+        Json::Value msg;
+        msg["type"] = "imageresult";
+        msg["data"]["status"] = "SUCCESS";
+        msg["data"]["x_min"] = bbox.x;
+        msg["data"]["y_min"] = bbox.y;
+        msg["data"]["t_width"] = bbox.width;
+        msg["data"]["t_height"] = bbox.height;
+        msg["data"]["time"] = elapsed_time; 
+        msg["data"]["v_width"] = frame_width;
+        msg["data"]["v_height"] = frame_height;
+        msg["data"]["size"] = bbox.width * bbox.height;
+        msg["data"]["mode"] = "detect";
+        send_imageresult(msg);
         
         if(GCS_STREAM && is_stream)
         {
@@ -901,6 +917,7 @@ void *detection_handler(void *arg)
             cv::resize(img, img_stream, cv::Size(640, 480));
             gcs_writer << img_stream;
         }
+
         //visualize detection
         if(visualize_detection_enable)
         {
@@ -918,7 +935,8 @@ void *detection_handler(void *arg)
         tracker->init(img, bbox);
 
         //tracking
-        double start_time = clock();
+        //double start_time = clock();
+        gettimeofday(&start_track, 0);
         double elapsed_time;
 
         for(int i = 0; i < track_frame_num; i++)
@@ -944,7 +962,9 @@ void *detection_handler(void *arg)
 
             if(i % send_msg_per_frame == 0)
             {
-                elapsed_time = (clock() - start_time) / CLOCKS_PER_SEC;
+                //elapsed_time = (clock() - start_time) / CLOCKS_PER_SEC;
+                gettimeofday(&end_track, 0);
+                elapsed_time = (end_track.tv_sec - start_track.tv_sec) + (double)(end_track.tv_usec - start_track.tv_usec) / (double) 1000000;
                 
                 Json::Value msg;
                 msg["type"] = "imageresult";
@@ -956,11 +976,13 @@ void *detection_handler(void *arg)
                 msg["data"]["time"] = elapsed_time; 
                 msg["data"]["v_width"] = frame_width;
                 msg["data"]["v_height"] = frame_height;
-		msg["data"]["size"] = bbox.width * bbox.height;
+		        msg["data"]["size"] = bbox.width * bbox.height;
+                msg["data"]["mode"] = "track";
 
                 send_imageresult(msg);
 
-                start_time = clock();
+                //start_time = clock();
+                gettimeofday(&start_track, 0);
             }
 
             
